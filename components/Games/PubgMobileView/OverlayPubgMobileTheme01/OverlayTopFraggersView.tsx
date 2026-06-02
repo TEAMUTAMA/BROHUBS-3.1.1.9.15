@@ -12,6 +12,7 @@ import { Theme, Asset, Game, PlayerData } from '../../../../types';
 import PanelControlMonitor, { PreviewControlContext } from '../../../PanelControlMonitor';
 import { AnimationConfig, getAnimationVariants } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
+import { notifyCompanionData } from '@/lib/overlayData';
 
 interface OverlayTopFraggersViewProps {
   asset: Asset;
@@ -389,6 +390,35 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
       animation: animationConfig,
     });
   }, [asset.id, animationConfig, visualOnly]);
+
+  useEffect(() => {
+    if (visualOnly) return;
+    const timer = setTimeout(() => {
+      notifyCompanionData({
+        assetId: asset.id,
+        data: {
+          BROHUBS_TOPFRAGGERS_DATA: fraggers,
+          BROHUBS_TOPFRAGGERS_VISUAL: visualConfig,
+          BROHUBS_TOPFRAGGERS_TYPOGRAPHY: typography,
+          BROHUBS_TOPFRAGGERS_LAYOUT: cardLayout,
+          BROHUBS_TOPFRAGGERS_MATCH: matchInfo,
+          BROHUBS_LEADERBOARD_TEAMS: teams,
+          BROHUBS_LEADERBOARD_MATCH: currentMatch,
+        },
+      });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    asset.id,
+    fraggers,
+    visualConfig,
+    typography,
+    cardLayout,
+    matchInfo,
+    teams,
+    currentMatch,
+    visualOnly,
+  ]);
 
   const getAssetAnimationVariants = useCallback(() => {
     const variants = getAnimationVariants(animationConfig);

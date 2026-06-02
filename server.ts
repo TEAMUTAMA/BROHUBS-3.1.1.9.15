@@ -29,6 +29,23 @@ async function startServer() {
     });
   };
 
+  // Latest overlay data per asset (teams, players, layout, etc.)
+  const dataState: Record<string, Record<string, unknown>> = {};
+
+  const broadcastData = (payload: object) => {
+    const line = JSON.stringify(payload);
+    sseClients.forEach((client) => {
+      client.write(`event: data\ndata: ${line}\n\n`);
+    });
+  };
+
+  const replayDataState = (client: any) => {
+    Object.entries(dataState).forEach(([assetId, data]) => {
+      const payload = JSON.stringify({ assetId, data });
+      client.write(`event: data\ndata: ${payload}\n\n`);
+    });
+  };
+
   // API Route for SSE connection
   app.get("/api/companion/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
@@ -41,6 +58,7 @@ async function startServer() {
     // Add to active clients list
     sseClients.push(res);
     replayAnimationState(res);
+    replayDataState(res);
 
     // Keep connection alive with silent ping every 30 seconds
     const pingInterval = setInterval(() => {
@@ -117,6 +135,23 @@ async function startServer() {
     return res.json({
       success: true,
       message: `Animation synced to ${sseClients.length} output client(s).`,
+      assetId,
+    });
+  });
+
+  app.post("/api/companion/data", express.json(), (req, res) => {
+    const { assetId, data } = req.body;
+
+    if (!assetId || !data || typeof data !== "object") {
+      return res.status(400).json({ error: "Missing assetId or data object" });
+    }
+
+    dataState[assetId] = { ...(dataState[assetId] || {}), ...data };
+    broadcastData({ assetId, data: dataState[assetId] });
+
+    return res.json({
+      success: true,
+      message: `Overlay data synced to ${sseClients.length} output client(s).`,
       assetId,
     });
   });

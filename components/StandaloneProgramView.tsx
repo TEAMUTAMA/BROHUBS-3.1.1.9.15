@@ -5,8 +5,7 @@ import { getGames, getThemes } from '../services/gameService';
 import { useSharedState } from '../lib/useSharedState';
 import { resolveAssetIdFromLocation, resolveProjectScopeFromLocation } from '../lib/outputRoute';
 import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey } from '../lib/programLayers';
-import { useCompanionStream } from '../lib/useCompanionStream';
-import { useCompanionAnimationSync } from '../lib/useCompanionAnimationSync';
+import { useCompanionOutputSync } from '../lib/useCompanionOutputSync';
 import OverlayTopFraggersView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayLeaderboardView';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,8 +28,7 @@ const StandaloneProgramView: React.FC = () => {
   );
 
   // OBS / browser source: follow PGM triggers via SSE (not localStorage from dashboard tab)
-  useCompanionStream(setProgramLayers, true);
-  useCompanionAnimationSync(true);
+  useCompanionOutputSync(setProgramLayers, true);
 
   // Local helper UI states for alignment
   const [showGrid, setShowGrid] = useState(false);

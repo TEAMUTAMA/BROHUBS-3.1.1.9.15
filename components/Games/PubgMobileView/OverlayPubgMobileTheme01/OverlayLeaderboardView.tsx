@@ -70,6 +70,7 @@ import {
   resolveAnimationConfig,
 } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
+import { notifyCompanionData } from '@/lib/overlayData';
 
 interface OverlayLeaderboardViewProps {
   asset: Asset;
@@ -416,6 +417,34 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       { rank: 3, name: 'PLAYER 3', team: 'TEAM C', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
       { rank: 4, name: 'PLAYER 4', team: 'TEAM D', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
       { rank: 5, name: 'PLAYER 5', team: 'TEAM E', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+  ]);
+
+  // Push team / player / layout data to OBS output links (debounced)
+  useEffect(() => {
+    if (visualOnly) return;
+    const timer = setTimeout(() => {
+      notifyCompanionData({
+        assetId: asset.id,
+        data: {
+          BROHUBS_LEADERBOARD_TEAMS: teams,
+          BROHUBS_LEADERBOARD_TITLE: matchTitle,
+          BROHUBS_LEADERBOARD_MATCH: currentMatch,
+          BROHUBS_LEADERBOARD_VISUAL: visualConfig,
+          BROHUBS_LEADERBOARD_LAYOUT: layoutConfig,
+          BROHUBS_TOPFRAGGERS_DATA: fraggers,
+        },
+      });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    asset.id,
+    teams,
+    matchTitle,
+    currentMatch,
+    visualConfig,
+    layoutConfig,
+    fraggers,
+    visualOnly,
   ]);
 
   const handleResetAll = () => {
