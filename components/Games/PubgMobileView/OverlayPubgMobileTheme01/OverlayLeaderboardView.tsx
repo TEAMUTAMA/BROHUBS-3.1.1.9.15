@@ -154,6 +154,15 @@ const getLeaderboardTeamLabel = (team: Pick<Team, 'team' | 'teamAbbreviation'>, 
   return deriveTeamAbbreviation(team.team);
 };
 
+const ensureTeamAbbreviation = (team: Team, projectPlayers: PlayerData[] = []): Team => {
+  if (team.teamAbbreviation?.trim()) return team;
+  const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamAbbreviation?.trim();
+  return {
+    ...team,
+    teamAbbreviation: (fromDb || deriveTeamAbbreviation(team.team)).toUpperCase(),
+  };
+};
+
 const INITIAL_LEADERBOARD_DATA = Array.from({ length: 16 }, (_, i) => ({
   rank: i + 1,
   team: `TEAM ${String.fromCharCode(65 + i)}`,
@@ -417,17 +426,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   useEffect(() => {
     setTeams((prev) => {
-      if (!prev.some((team) => !team.teamAbbreviation?.trim())) return prev;
-      return prev.map((team) => {
-        if (team.teamAbbreviation?.trim()) return team;
-        const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamAbbreviation?.trim();
-        return {
-          ...team,
-          teamAbbreviation: (fromDb || deriveTeamAbbreviation(team.team)).toUpperCase(),
-        };
-      });
+      const next = prev.map((team) => ensureTeamAbbreviation(team, projectPlayers));
+      const changed = next.some((team, index) => team.teamAbbreviation !== prev[index]?.teamAbbreviation);
+      return changed ? next : prev;
     });
-  }, [projectPlayers, setTeams]);
+  }, [teams, projectPlayers, setTeams]);
 
   // Persistence Effects removed as useSharedState handles it
 
@@ -469,7 +472,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       notifyCompanionData({
         assetId: asset.id,
         data: {
-          BROHUBS_LEADERBOARD_TEAMS: teams,
+          BROHUBS_LEADERBOARD_TEAMS: teams.map((team) => ensureTeamAbbreviation(team, projectPlayers)),
           BROHUBS_LEADERBOARD_TITLE: matchTitle,
           BROHUBS_LEADERBOARD_MATCH: currentMatch,
           BROHUBS_LEADERBOARD_VISUAL: visualConfig,
@@ -955,7 +958,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                             {t.teamLogo ? <img src={t.teamLogo} className="w-full h-full object-contain" /> : <Shield size={layoutConfig.logoSize - 8} className="opacity-20 text-black" />}
                           </div>
                           <div className="flex flex-col justify-center min-w-0">
-                              <span className="font-[900] uppercase leading-none mt-0.5 whitespace-nowrap" style={{ fontSize: `${layoutConfig.fontSize}px`, color: isWinner ? visualConfig.winnerText : visualConfig.teamNameColor }}>{projectPlayers.find(p => p.team === t.team)?.teamAbbreviation || t.team}</span>
+                              <span className="font-[900] uppercase leading-none mt-0.5 whitespace-nowrap" style={{ fontSize: `${layoutConfig.fontSize}px`, color: isWinner ? visualConfig.winnerText : visualConfig.teamNameColor }}>{getLeaderboardTeamLabel(t, projectPlayers)}</span>
                           </div>
                        </div>
 
@@ -1010,7 +1013,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
            </div>
          )}
     </motion.div>
-  ), [showOverlay, getAssetAnimationVariants, layoutConfig, visualConfig, matchTitle, sortedPreviewTeams, activePopups, aliveCount, killPointValue, effectiveAnimationConfig, getStatusColor, currentMatch, rowVariants, bottomBoxVariants]);
+  ), [showOverlay, getAssetAnimationVariants, layoutConfig, visualConfig, matchTitle, sortedPreviewTeams, activePopups, aliveCount, killPointValue, effectiveAnimationConfig, getStatusColor, currentMatch, rowVariants, bottomBoxVariants, projectPlayers, visualOnly, style]);
 
   // Sync preview content to parent
   useEffect(() => {
