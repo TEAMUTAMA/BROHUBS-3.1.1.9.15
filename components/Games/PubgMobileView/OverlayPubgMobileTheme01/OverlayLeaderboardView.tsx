@@ -19,6 +19,7 @@ import TieBreakerModal, { TieBreakerCriteria } from '../TieBreakerModal';
 interface Team {
   rank: number;
   team: string;
+  teamAbbreviation?: string;
   country: string;
   teamLogo: string;
   status: number[];
@@ -131,9 +132,32 @@ const ScrollableInput = ({
   return <input ref={inputRef} type="number" value={value} onChange={(e) => onChange(Number(e.target.value))} className={className} />;
 };
 
+const deriveTeamAbbreviation = (teamName: string): string => {
+  const trimmed = teamName.trim();
+  if (!trimmed) return '---';
+  if (!trimmed.includes(' ')) {
+    return trimmed.length <= 5 ? trimmed.toUpperCase() : trimmed.slice(0, 4).toUpperCase();
+  }
+  return trimmed
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 4)
+    .toUpperCase();
+};
+
+const getLeaderboardTeamLabel = (team: Pick<Team, 'team' | 'teamAbbreviation'>, projectPlayers: PlayerData[] = []): string => {
+  if (team.teamAbbreviation?.trim()) return team.teamAbbreviation.trim().toUpperCase();
+  const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamAbbreviation;
+  if (fromDb?.trim()) return fromDb.trim().toUpperCase();
+  return deriveTeamAbbreviation(team.team);
+};
+
 const INITIAL_LEADERBOARD_DATA = Array.from({ length: 16 }, (_, i) => ({
   rank: i + 1,
   team: `TEAM ${String.fromCharCode(65 + i)}`,
+  teamAbbreviation: String.fromCharCode(65 + i),
   country: 'ID',
   teamLogo: '',
   status: [1, 1, 1, 1], // 0:Dead, 1:Alive, 2:Knock
@@ -365,10 +389,14 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
         const newLogo = teamPlayers[0].teamLogo || team.teamLogo;
         const newCountry = teamPlayers[0].country || team.country;
+        const newAbbreviation = (
+          teamPlayers[0].teamAbbreviation?.trim() || deriveTeamAbbreviation(team.team)
+        ).toUpperCase();
         
         // Only update if difference exists
         if (team.teamLogo === newLogo && 
             team.country === newCountry &&
+            team.teamAbbreviation === newAbbreviation &&
             JSON.stringify(team.playerNames) === JSON.stringify(newNames)
         ) return team;
 
@@ -377,6 +405,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
             ...team,
             teamLogo: newLogo,
             country: newCountry,
+            teamAbbreviation: newAbbreviation,
             playerNames: newNames
         };
     });
@@ -385,6 +414,20 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         setTeams(newTeams);
     }
   }, [projectPlayers]);
+
+  useEffect(() => {
+    setTeams((prev) => {
+      if (!prev.some((team) => !team.teamAbbreviation?.trim())) return prev;
+      return prev.map((team) => {
+        if (team.teamAbbreviation?.trim()) return team;
+        const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamAbbreviation?.trim();
+        return {
+          ...team,
+          teamAbbreviation: (fromDb || deriveTeamAbbreviation(team.team)).toUpperCase(),
+        };
+      });
+    });
+  }, [projectPlayers, setTeams]);
 
   // Persistence Effects removed as useSharedState handles it
 
@@ -639,6 +682,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     if (teamPlayers.length === 0) return;
     const newTeams = [...teams];
     newTeams[rankIndex].team = teamName;
+    newTeams[rankIndex].teamAbbreviation = (
+      teamPlayers[0].teamAbbreviation?.trim() || deriveTeamAbbreviation(teamName)
+    ).toUpperCase();
     newTeams[rankIndex].teamLogo = teamPlayers[0].teamLogo || '';
     newTeams[rankIndex].country = teamPlayers[0].country || 'ID'; // Sync country if exists
     newTeams[rankIndex].playerNames = [
@@ -662,6 +708,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
             ...team,
             teamLogo: teamPlayers[0].teamLogo || team.teamLogo,
             country: teamPlayers[0].country || team.country,
+            teamAbbreviation: (
+              teamPlayers[0].teamAbbreviation?.trim() || deriveTeamAbbreviation(team.team)
+            ).toUpperCase(),
             playerNames: [
                 teamPlayers[0]?.name || team.playerNames[0] || 'P1',
                 teamPlayers[1]?.name || team.playerNames[1] || 'P2',
@@ -1198,6 +1247,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                     <button onClick={() => openDbModal(idx)} className="w-6 h-6 rounded bg-[#ccff00]/10 border border-[#ccff00]/20 flex items-center justify-center text-[#ccff00] hover:bg-[#ccff00] hover:text-black transition-all shrink-0" title="Ganti Tim dari Database"><Database size={10} /></button>
                                                     <div className="flex flex-col gap-1 w-full min-w-0">
                                                         <input type="text" value={t.team} onChange={(e) => updateTeamField(idx, 'team', e.target.value)} className="w-full bg-transparent border-b border-transparent focus:border-[#ccff00] text-xs font-black text-white uppercase outline-none placeholder:text-zinc-600 truncate" />
+                                                        <input type="text" value={t.teamAbbreviation || ''} onChange={(e) => updateTeamField(idx, 'teamAbbreviation', e.target.value.toUpperCase())} placeholder="SINGKATAN" className="w-full bg-transparent border-b border-transparent focus:border-[#ccff00] text-[9px] font-black text-[#ccff00] uppercase outline-none placeholder:text-zinc-600 truncate" />
                                                         <div className="flex items-center gap-2">
                                                             <span className="inline-flex items-center w-fit px-1.5 py-0.5 bg-[#F97316] text-black text-[8px] font-black rounded-sm uppercase tracking-tighter">K: {t.playerKills.reduce((a,b)=>a+b,0)}</span>
                                                             {t.totalWwcds > 0 && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-[#ccff00] text-black text-[8px] font-black rounded-sm uppercase tracking-tighter"><Trophy size={8}/> {t.totalWwcds}</span>}
@@ -1730,7 +1780,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     </div>
                                     <div className="text-left">
                                         <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">DETECTED WINNER</p>
-                                        <h3 className="text-xl font-black text-white uppercase tracking-tight truncate">{matchWinner?.team}</h3>
+                                        <h3 className="text-xl font-black text-white uppercase tracking-tight truncate">{matchWinner ? getLeaderboardTeamLabel(matchWinner, projectPlayers) : ''}</h3>
                                     </div>
                                 </div>
                                 <div className="space-y-2 pt-4 border-t border-white/5">
