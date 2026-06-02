@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Theme, Asset, Game, PlayerData } from '../../../../types';
 import PanelControlMonitor, { PreviewControlContext } from '../../../PanelControlMonitor';
 import { AnimationConfig, getAnimationVariants } from '@/constants/transitions';
+import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 
 interface OverlayTopFraggersViewProps {
   asset: Asset;
@@ -380,6 +381,14 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
   useEffect(() => {
     setDraftAnimationConfig(animationConfig);
   }, [animationConfig]);
+
+  useEffect(() => {
+    if (visualOnly) return;
+    notifyCompanionAnimation({
+      assetId: asset.id,
+      animation: animationConfig,
+    });
+  }, [asset.id, animationConfig, visualOnly]);
 
   const getAssetAnimationVariants = useCallback(() => {
     const variants = getAnimationVariants(animationConfig);

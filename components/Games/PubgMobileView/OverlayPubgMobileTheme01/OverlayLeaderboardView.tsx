@@ -63,7 +63,13 @@ interface LayoutConfig {
   flagWidth: number;
 }
 
-import { AnimationConfig, getAnimationVariants } from '@/constants/transitions';
+import {
+  AnimationConfig,
+  ANIMATION_PRESETS,
+  getAnimationVariants,
+  resolveAnimationConfig,
+} from '@/constants/transitions';
+import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 
 interface OverlayLeaderboardViewProps {
   asset: Asset;
@@ -96,74 +102,6 @@ const COUNTRIES = [
   { code: 'PK', name: 'Pakistan' }, { code: 'RU', name: 'Russia' }, { code: 'UA', name: 'Ukraine' },
   { code: 'GB', name: 'United Kingdom' }, { code: 'DE', name: 'Germany' }, { code: 'FR', name: 'France' }
 ].sort((a, b) => a.name.localeCompare(b.name));
-
-const ANIMATION_PRESETS: {
-  id: string;
-  name: string;
-  description: string;
-  config: Omit<AnimationConfig, 'mode' | 'presetId'>;
-}[] = [
-  {
-    id: 'broadcast',
-    name: 'Broadcast Standard',
-    description: 'Professional tournament style with smooth sliding transitions.',
-    config: {
-      inType: 'slide-right' as const,
-      outType: 'fade' as const,
-      duration: 0.8,
-      delay: 0,
-      easing: 'easeOut' as const,
-      useSpring: true,
-      staggerChildren: true,
-      staggerDirection: 'top-down' as const
-    }
-  },
-  {
-    id: 'cinematic',
-    name: 'Cinematic Rise',
-    description: 'Dramatic entrance from the bottom using back-out easing.',
-    config: {
-      inType: 'slide-up' as const,
-      outType: 'slide-down' as const,
-      duration: 1.2,
-      delay: 0.1,
-      easing: 'backOut' as const,
-      useSpring: true,
-      staggerChildren: true,
-      staggerDirection: 'bottom-up' as const
-    }
-  },
-  {
-    id: 'minimal',
-    name: 'Minimal Fade',
-    description: 'Clean and simple fade transitions for a subtle look.',
-    config: {
-      inType: 'fade' as const,
-      outType: 'fade' as const,
-      duration: 0.5,
-      delay: 0,
-      easing: 'linear' as const,
-      useSpring: false,
-      staggerChildren: false,
-      staggerDirection: 'top-down' as const
-    }
-  },
-  {
-    id: 'dynamic-up',
-    name: 'Dynamic Rise',
-    description: 'Energetic upward sliding motion with spring physics.',
-    config: {
-      inType: 'slide-up' as const,
-      outType: 'slide-down' as const,
-      duration: 0.7,
-      delay: 0,
-      easing: 'easeOut' as const,
-      useSpring: true,
-      staggerChildren: true,
-      staggerDirection: 'center-out' as const
-    }
-  }
-];
 
 const ScrollableInput = ({ 
   value, 
@@ -374,6 +312,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   useEffect(() => {
     setDraftAnimationConfig(animationConfig);
   }, [animationConfig]);
+
+  const effectiveAnimationConfig = useMemo(
+    () => resolveAnimationConfig(animationConfig, presetOverrides, ANIMATION_PRESETS),
+    [animationConfig, presetOverrides]
+  );
+
+  // Push transition settings to OBS / output links (separate browser storage)
+  useEffect(() => {
+    if (visualOnly) return;
+    notifyCompanionAnimation({
+      assetId: asset.id,
+      animation: effectiveAnimationConfig,
+      presetOverrides,
+    });
+  }, [asset.id, effectiveAnimationConfig, presetOverrides, visualOnly]);
 
   const [showOverlay, setShowOverlay] = useState(true);
   const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
@@ -736,8 +689,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   }, [teams, tieBreakerOrder, killPointValue]);
 
   const getAssetAnimationVariants = useCallback(() => {
-    return getAnimationVariants(animationConfig);
-  }, [animationConfig]);
+    return getAnimationVariants(effectiveAnimationConfig);
+  }, [effectiveAnimationConfig]);
 
   const rowVariants = useMemo(() => ({
     initial: { x: 20, opacity: 0 },
@@ -861,9 +814,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                       custom={{
                         index: idx,
                         total: sortedPreviewTeams.length,
-                        direction: animationConfig.staggerDirection || 'top-down',
-                        delay: animationConfig.staggerDelay || 0.05,
-                        stagger: animationConfig.staggerChildren
+                        direction: effectiveAnimationConfig.staggerDirection || 'top-down',
+                        delay: effectiveAnimationConfig.staggerDelay || 0.05,
+                        stagger: effectiveAnimationConfig.staggerChildren
                       }}
                       variants={rowVariants}
                       className="absolute top-0 left-0 w-full flex items-center justify-between px-6 border-b border-white/5 overflow-hidden"
@@ -955,9 +908,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
               <motion.div 
                 custom={{
                   total: sortedPreviewTeams.length,
-                  direction: animationConfig.staggerDirection || 'top-down',
-                  delay: animationConfig.staggerDelay || 0.05,
-                  stagger: animationConfig.staggerChildren
+                  direction: effectiveAnimationConfig.staggerDirection || 'top-down',
+                  delay: effectiveAnimationConfig.staggerDelay || 0.05,
+                  stagger: effectiveAnimationConfig.staggerChildren
                 }}
                 variants={bottomBoxVariants}
                 className="rounded-b-xl px-6 py-4 flex justify-center gap-8 shadow-2xl mt-0.5 border-t-2 border-black/10 relative z-20 shrink-0" 
@@ -979,7 +932,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
            </div>
          )}
     </motion.div>
-  ), [showOverlay, getAnimationVariants, layoutConfig, visualConfig, matchTitle, sortedPreviewTeams, activePopups, aliveCount, killPointValue, animationConfig, getStatusColor, currentMatch, rowVariants, bottomBoxVariants]);
+  ), [showOverlay, getAssetAnimationVariants, layoutConfig, visualConfig, matchTitle, sortedPreviewTeams, activePopups, aliveCount, killPointValue, effectiveAnimationConfig, getStatusColor, currentMatch, rowVariants, bottomBoxVariants]);
 
   // Sync preview content to parent
   useEffect(() => {

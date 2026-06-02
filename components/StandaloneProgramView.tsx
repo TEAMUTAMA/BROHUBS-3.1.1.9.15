@@ -3,6 +3,10 @@ import { Game, Theme } from '../types';
 import { ASSET_DATABASE } from '../constants/assets';
 import { getGames, getThemes } from '../services/gameService';
 import { useSharedState } from '../lib/useSharedState';
+import { resolveAssetIdFromLocation, resolveProjectScopeFromLocation } from '../lib/outputRoute';
+import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey } from '../lib/programLayers';
+import { useCompanionStream } from '../lib/useCompanionStream';
+import { useCompanionAnimationSync } from '../lib/useCompanionAnimationSync';
 import OverlayTopFraggersView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayLeaderboardView';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,12 +18,19 @@ const StandaloneProgramView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Shared state values for synchronization with control panel
-  const [selectedGameId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_GAME_ID', '');
-  const [selectedThemeId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_THEME_ID', '');
-  const [previewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
-  const [programLayers] = useSharedState<Record<number, string | null>>('BROHUBS_STUDIO_PROGRAM_LAYERS', {
-    1: null, 2: null, 3: null, 4: null, 5: null, 6: null
-  });
+  const [selectedGameId, setSelectedGameId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_GAME_ID', '');
+  const [selectedThemeId, setSelectedThemeId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_THEME_ID', '');
+  const [routeAssetId, setRouteAssetId] = useState<string | null>(() => resolveAssetIdFromLocation());
+  const [projectScope] = useState(() => resolveProjectScopeFromLocation());
+  const programLayersKey = getProgramLayersKey(projectScope);
+  const [programLayers, setProgramLayers] = useSharedState<Record<number, string | null>>(
+    programLayersKey,
+    DEFAULT_PROGRAM_LAYERS
+  );
+
+  // OBS / browser source: follow PGM triggers via SSE (not localStorage from dashboard tab)
+  useCompanionStream(setProgramLayers, true);
+  useCompanionAnimationSync(true);
 
   // Local helper UI states for alignment
   const [showGrid, setShowGrid] = useState(false);
@@ -54,6 +65,26 @@ const StandaloneProgramView: React.FC = () => {
 
     return () => clearTimeout(timer);
   }, []);
+
+  // Resolve /o/{member}/{project}/{asset-slug} URLs to a concrete overlay asset
+  useEffect(() => {
+    const syncRouteAsset = () => setRouteAssetId(resolveAssetIdFromLocation());
+
+    syncRouteAsset();
+    window.addEventListener('popstate', syncRouteAsset);
+    return () => window.removeEventListener('popstate', syncRouteAsset);
+  }, []);
+
+  useEffect(() => {
+    if (!routeAssetId || themes.length === 0) return;
+
+    const asset = ASSET_DATABASE.find((a) => a.id === routeAssetId);
+    if (!asset) return;
+
+    setSelectedGameId(asset.gameId);
+    const theme = themes.find((t) => t.gameId === asset.gameId);
+    if (theme) setSelectedThemeId(theme.id);
+  }, [routeAssetId, themes, setSelectedGameId, setSelectedThemeId]);
 
   // Set up auto-scaling logic matching 16:9 1920x1080 resolution
   useEffect(() => {
@@ -154,8 +185,13 @@ const StandaloneProgramView: React.FC = () => {
     );
   }
 
-  // Count active overlay layers
-  const activeLayersCount = Object.values(programLayers).filter(id => id !== null).length;
+  // Only render assets that are ON AIR on the PGM bus (optional: lock to URL asset slug)
+  const activeProgramEntries = Object.entries(programLayers).filter(([, assetId]) => {
+    if (!assetId) return false;
+    if (routeAssetId) return assetId === routeAssetId;
+    return true;
+  });
+  const activeLayersCount = activeProgramEntries.length;
 
   return (
     <div 
@@ -179,27 +215,22 @@ const StandaloneProgramView: React.FC = () => {
         {/* Layer Renderer */}
         <div className="absolute inset-0">
           <AnimatePresence>
-            {activeLayersCount > 0 ? (
-              Object.entries(programLayers)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([layer, assetId]) => {
-                  if (!assetId) return null;
-                  return renderProgramAsset(
-                    assetId, 
-                    { zIndex: Number(layer), position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }, 
-                    `standalone-layer-${layer}-${assetId}`
-                  );
-                })
-            ) : (
-              // Fallback to active preview asset if no program layers are loaded so "Halaman Baru" is never blank
-              previewAssetId ? (
+            {activeProgramEntries
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([layer, assetId]) =>
                 renderProgramAsset(
-                  previewAssetId,
-                  { zIndex: 1, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
-                  `standalone-preview-${previewAssetId}`
+                  assetId,
+                  {
+                    zIndex: Number(layer),
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                  },
+                  `standalone-layer-${layer}-${assetId}`
                 )
-              ) : null
-            )}
+              )}
           </AnimatePresence>
         </div>
 

@@ -7,6 +7,8 @@ import PanelControlMonitor from '../PanelControlMonitor';
 import { LayoutTemplate, Monitor, Settings2, ChevronDown, Gamepad2, Palette, Layers, Eye, EyeOff, Play, Square, Keyboard, Radio, Copy, Check, ExternalLink, HelpCircle, Info, X, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSharedState } from '../../lib/useSharedState';
+import { getProgramLayersKey } from '../../lib/programLayers';
+import { notifyCompanionTrigger } from '../../lib/companionProgram';
 
 interface GlobalStudioProps {
   games: Game[];
@@ -22,9 +24,10 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
   const [selectedThemeId, setSelectedThemeId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_THEME_ID', '');
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
   const [previewAssetId, setPreviewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
-  const [programLayers, setProgramLayers] = useSharedState<Record<number, string | null>>(`BROHUBS_STUDIO_PROGRAM_LAYERS_${project?.id || 'GLOBAL'}`, {
-    1: null, 2: null, 3: null, 4: null, 5: null, 6: null
-  });
+  const [programLayers, setProgramLayers] = useSharedState<Record<number, string | null>>(
+    getProgramLayersKey(project?.id),
+    { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null }
+  );
   const [assetLayerSelection, setAssetLayerSelection] = useSharedState<Record<string, number | null>>(`BROHUBS_STUDIO_ASSET_LAYERS_${project?.id || 'GLOBAL'}`, {});
   const [showList, setShowList] = useState(true);
   const [showMonitor, setShowMonitor] = useState(true);
@@ -187,6 +190,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           });
           return newLayers;
         });
+        notifyCompanionTrigger(assetId, 'stop');
       } else {
         // Status 0 or 1 -> Status 2 (PROGRAM)
         setPreviewAssetId(null); // Ensure it's not in preview anymore
@@ -199,6 +203,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           newLayers[selectedLayer] = assetId;
           return newLayers;
         });
+        notifyCompanionTrigger(assetId, 'play', selectedLayer);
       }
     } else {
       // If no layer is selected, we only manage PREVIEW status
@@ -216,6 +221,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             });
             return newLayers;
           });
+          notifyCompanionTrigger(assetId, 'stop');
         }
         setPreviewAssetId(assetId);
       }

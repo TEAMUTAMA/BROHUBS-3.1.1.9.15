@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Member, Asset, Project } from '../../types';
 import { useSharedState } from '../../lib/useSharedState';
+import { getProgramLayersKey } from '../../lib/programLayers';
 
 // ============================================================================
 // SELF-CONTAINED UTILITY: Robust copy-to-clipboard (iframe & non-HTTPS safe)
@@ -44,7 +45,7 @@ interface MemberOutputViewProps {
 const AssetStatusBadge: React.FC<{ asset: Asset; project: Project | undefined }> = ({ asset, project }) => {
   const [previewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
   const [programLayers] = useSharedState<Record<number, string | null>>(
-    `BROHUBS_STUDIO_PROGRAM_LAYERS_${project?.id || 'GLOBAL'}`,
+    getProgramLayersKey(project?.id),
     { 1: null, 2: null, 3: null, 4: null, 5: null }
   );
 
@@ -90,12 +91,13 @@ const MemberOutputView: React.FC<MemberOutputViewProps> = ({ povMember, assets, 
     // Map existing Asset 'name' to the slugified asset name
     const assetSlug = slugify(asset.name);
     
-    // Find project to get its name for the URL
-    // Project and Asset in types.ts use 'id'
-    const project = projects.find(p => p.id === asset.gameId); // Assuming gameId relates the asset to project, need to check this logic.
+    const project =
+      projects.find((p) => p.deployedAssets?.some((a) => a.id === asset.id)) ||
+      projects[0];
     const projectSlug = project ? slugify(project.name) : 'default';
     
-    return `${baseUrl}/o/${memberSlug}/${projectSlug}/${assetSlug}`;
+    const projectScope = project?.id || 'GLOBAL';
+    return `${baseUrl}/o/${memberSlug}/${projectSlug}/${assetSlug}?project=${encodeURIComponent(projectScope)}`;
   };
 
   const handleCopy = async (url: string) => {

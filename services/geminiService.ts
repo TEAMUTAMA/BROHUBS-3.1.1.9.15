@@ -1,12 +1,23 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize the GoogleGenAI client using the API key directly from environment variables.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai: GoogleGenAI | null = null;
+
+function getClient(): GoogleGenAI | null {
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!ai) ai = new GoogleGenAI({ apiKey });
+  return ai;
+}
 
 export const getAIResponse = async (prompt: string) => {
+  const client = getClient();
+  if (!client) {
+    return "AI assistant is unavailable. Add GEMINI_API_KEY to .env.local to enable chat.";
+  }
+
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {

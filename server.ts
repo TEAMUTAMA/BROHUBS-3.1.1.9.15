@@ -9,6 +9,26 @@ async function startServer() {
   // Track active EventSource (SSE) clients
   let sseClients: any[] = [];
 
+  // Latest animation config per asset (synced to OBS / output links)
+  const animationState: Record<
+    string,
+    { animation: unknown; presetOverrides?: unknown }
+  > = {};
+
+  const broadcastAnimation = (payload: object) => {
+    const data = JSON.stringify(payload);
+    sseClients.forEach((client) => {
+      client.write(`event: animation\ndata: ${data}\n\n`);
+    });
+  };
+
+  const replayAnimationState = (client: any) => {
+    Object.entries(animationState).forEach(([assetId, state]) => {
+      const payload = JSON.stringify({ assetId, ...state });
+      client.write(`event: animation\ndata: ${payload}\n\n`);
+    });
+  };
+
   // API Route for SSE connection
   app.get("/api/companion/stream", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
@@ -20,6 +40,7 @@ async function startServer() {
 
     // Add to active clients list
     sseClients.push(res);
+    replayAnimationState(res);
 
     // Keep connection alive with silent ping every 30 seconds
     const pingInterval = setInterval(() => {
@@ -80,6 +101,23 @@ async function startServer() {
       success: true,
       message: `Trigger sent to ${sseClients.length} active broadcast overlays/dashboards.`,
       payload: { assetId, action, layer },
+    });
+  });
+
+  app.post("/api/companion/animation", express.json(), (req, res) => {
+    const { assetId, animation, presetOverrides } = req.body;
+
+    if (!assetId || !animation) {
+      return res.status(400).json({ error: "Missing assetId or animation" });
+    }
+
+    animationState[assetId] = { animation, presetOverrides };
+    broadcastAnimation({ assetId, animation, presetOverrides });
+
+    return res.json({
+      success: true,
+      message: `Animation synced to ${sseClients.length} output client(s).`,
+      assetId,
     });
   });
 
