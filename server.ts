@@ -1,3 +1,4 @@
+import http from "http";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
@@ -164,10 +165,15 @@ async function startServer() {
     });
   });
 
-  // Vite middleware for development
+  const httpServer = http.createServer(app);
+
+  // Vite middleware for development — HMR di port HTTP yang sama (hindari bentrok 24678)
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -179,8 +185,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`(also http://127.0.0.1:${PORT} — use one URL consistently in every browser tab)`);
   });
 }
 

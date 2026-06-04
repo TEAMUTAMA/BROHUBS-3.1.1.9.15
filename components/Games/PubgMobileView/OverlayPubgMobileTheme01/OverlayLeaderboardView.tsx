@@ -1,5 +1,12 @@
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from 'react';
 import { useSharedState } from '@/lib/useSharedState';
 import { 
   Database, Palette, Activity, LayoutTemplate, 
@@ -105,6 +112,19 @@ interface EliminationBannerLayout {
 }
 
 const STAGED_ELIM_PREVIEW_ALERT_ID = 'brohubs-elim-banner-staged-preview';
+
+/** Data contoh saat belum ada tim / eliminasi di klasemen */
+const STAGED_ELIM_PREVIEW_FALLBACK: TeamEliminationAlert = {
+  id: STAGED_ELIM_PREVIEW_ALERT_ID,
+  teamIndex: 0,
+  placementRank: 8,
+  teamRank: 5,
+  teamLabel: 'TEAM PREVIEW',
+  teamName: 'TEAM PREVIEW',
+  teamLogo: '',
+  country: 'id',
+  at: 0,
+};
 
 const DEFAULT_ELIMINATION_BANNER_LAYOUT: EliminationBannerLayout = {
   scale: 100,
@@ -235,6 +255,34 @@ const COUNTRIES = [
 const LEADERBOARD_FLAG_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 const LEADERBOARD_FLAG_LAYOUT_TRANSITION = `width 0.65s ${LEADERBOARD_FLAG_EASE}, opacity 0.55s ${LEADERBOARD_FLAG_EASE}, margin 0.65s ${LEADERBOARD_FLAG_EASE}, transform 0.55s ${LEADERBOARD_FLAG_EASE}`;
 const LEADERBOARD_PANEL_WIDTH_TRANSITION = `width 0.65s ${LEADERBOARD_FLAG_EASE}`;
+/** Kolom ELIMS (match 2+) — masuk/keluar lebih halus */
+const LEADERBOARD_ELIMS_COLUMN_WIDTH_PX = 36;
+const LEADERBOARD_ELIMS_PANEL_EXTRA_PX = 44;
+/** Lebar kolom Status/Pts tetap; ruang ELIMS ditambah di kanan supaya Status ikut bergeser */
+const LEADERBOARD_ELIMS_STATUS_WIDTH_PX = 80;
+const LEADERBOARD_ELIMS_PTS_WIDTH_PX = 80;
+const LEADERBOARD_ELIMS_LAYOUT_TRANSITION = `width 0.85s ${LEADERBOARD_FLAG_EASE}, max-width 0.85s ${LEADERBOARD_FLAG_EASE}, min-width 0.85s ${LEADERBOARD_FLAG_EASE}, opacity 0.72s ${LEADERBOARD_FLAG_EASE}, transform 0.78s ${LEADERBOARD_FLAG_EASE}, margin 0.85s ${LEADERBOARD_FLAG_EASE}`;
+
+/** Popup ELIMINATED di baris klasemen — masuk/keluar halus (bukan putus di akhir) */
+const ELIMINATED_POPUP_EASE_IN: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const ELIMINATED_POPUP_EASE_OUT: [number, number, number, number] = [0.33, 1, 0.68, 1];
+const ELIMINATED_POPUP_HOLD_MS = 3400;
+
+/** Saat tersisa tepat 4 tim hidup — klasemen kanan keluar, bar 4 tim dari atas */
+const FINAL_FOUR_ALIVE_COUNT = 4;
+const FINAL_FOUR_TOP_OFFSET_PX = 56;
+const FINAL_FOUR_PANEL_EXIT_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const FINAL_FOUR_ENTER_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const applyElimBannerTransformToElement = (
+  el: HTMLElement,
+  layout: EliminationBannerLayout
+): void => {
+  el.style.left = `calc(50% + ${layout.xOffset}px)`;
+  el.style.top = `${layout.yOffset}px`;
+  el.style.transform = `translateX(-50%) scale(${layout.scale / 100})`;
+  el.style.transformOrigin = 'top center';
+};
 
 const ScrollableInput = ({
   value,
@@ -283,6 +331,234 @@ const ScrollableInput = ({
   );
 };
 
+/**
+ * Input SCALE/POS banner — draft lokal saat scroll agar tidak bentrok dengan re-render preview.
+ */
+const ElimBannerLayoutInput = ({
+  value,
+  onChange,
+  previewMode = false,
+  onWheelTuningChange,
+  onFocusTuningChange,
+  className,
+}: {
+  value: number;
+  onChange: (val: number) => void;
+  /** Preview Sementara — scroll tanpa reset angka dari parent */
+  previewMode?: boolean;
+  onWheelTuningChange?: (active: boolean) => void;
+  onFocusTuningChange?: (active: boolean) => void;
+  className?: string;
+}) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const onChangeRef = useRef(onChange);
+  const draftRef = useRef(Number.isFinite(value) ? value : 0);
+  const wheelBurstRef = useRef(false);
+  const focusedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+  const wheelEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [draft, setDraft] = useState(() => (Number.isFinite(value) ? value : 0));
+  /** Teks bebas saat fokus — type=number + value terkontrol memblokir hapus semua lalu ketik ulang */
+  const [editingText, setEditingText] = useState<string | null>(null);
+  const editingTextRef = useRef<string | null>(null);
+
+  onChangeRef.current = onChange;
+  draftRef.current = draft;
+
+  const setWheelTuning = useCallback(
+    (active: boolean) => {
+      onWheelTuningChange?.(active);
+    },
+    [onWheelTuningChange]
+  );
+
+  const setFocusTuning = useCallback(
+    (active: boolean) => {
+      onFocusTuningChange?.(active);
+    },
+    [onFocusTuningChange]
+  );
+
+  const prevPreviewModeRef = useRef(false);
+
+  useEffect(() => {
+    const previewJustOn = previewMode && !prevPreviewModeRef.current;
+    prevPreviewModeRef.current = previewMode;
+
+    if (previewJustOn) {
+      const next = Number.isFinite(value) ? value : 0;
+      draftRef.current = next;
+      setDraft(next);
+      setEditingText(null);
+      return;
+    }
+
+    // Preview Sementara: jangan sync dari parent — value prop sengaja tertinggal saat tuning live
+    if (previewMode) return;
+
+    if (focusedRef.current || wheelBurstRef.current) return;
+    const next = Number.isFinite(value) ? value : 0;
+    if (draftRef.current === next) return;
+    draftRef.current = next;
+    setDraft(next);
+    setEditingText(null);
+  }, [value, previewMode]);
+
+  const commitToParent = useCallback((next: number) => {
+    draftRef.current = next;
+    setDraft(next);
+    onChangeRef.current(next);
+  }, []);
+
+  const endWheelBurst = useCallback(() => {
+    wheelBurstRef.current = false;
+    setWheelTuning(false);
+  }, [setWheelTuning]);
+
+  const bumpByWheel = useCallback(
+    (delta: number) => {
+      if (!wheelBurstRef.current) {
+        wheelBurstRef.current = true;
+        setWheelTuning(true);
+      }
+      const next = draftRef.current + delta;
+      draftRef.current = next;
+      setDraft(next);
+      setEditingText(null);
+      onChangeRef.current(next);
+
+      if (wheelEndTimerRef.current) {
+        clearTimeout(wheelEndTimerRef.current);
+      }
+      wheelEndTimerRef.current = setTimeout(endWheelBurst, 150);
+    },
+    [endWheelBurst, setWheelTuning]
+  );
+
+  useEffect(() => {
+    const element = inputRef.current;
+    if (!element) return;
+
+    const isWheelTarget = (e: WheelEvent) => {
+      if (document.activeElement === element) return true;
+      if (!previewMode) return false;
+      const rect = element.getBoundingClientRect();
+      return (
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      );
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!isWheelTarget(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (previewMode && document.activeElement !== element) {
+        element.focus({ preventScroll: true });
+      }
+      const step = e.shiftKey ? 10 : 1;
+      const delta = (e.deltaY > 0 ? -1 : 1) * step;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        bumpByWheel(delta);
+      });
+    };
+
+    element.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    return () => {
+      element.removeEventListener('wheel', handleWheel, { capture: true });
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (wheelEndTimerRef.current) clearTimeout(wheelEndTimerRef.current);
+    };
+  }, [bumpByWheel, previewMode]);
+
+  const displayValue = editingText ?? String(draft);
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      inputMode="numeric"
+      value={displayValue}
+      onFocus={() => {
+        focusedRef.current = true;
+        const seed = String(draftRef.current);
+        editingTextRef.current = seed;
+        setEditingText(seed);
+        setFocusTuning(true);
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        if (wheelEndTimerRef.current) {
+          clearTimeout(wheelEndTimerRef.current);
+          wheelEndTimerRef.current = null;
+        }
+        wheelBurstRef.current = false;
+        setWheelTuning(false);
+        const raw = (editingTextRef.current ?? String(draftRef.current)).trim();
+        if (raw !== '' && raw !== '-') {
+          const next = Number(raw);
+          if (Number.isFinite(next)) {
+            commitToParent(next);
+          } else {
+            commitToParent(draftRef.current);
+          }
+        } else {
+          commitToParent(draftRef.current);
+        }
+        editingTextRef.current = null;
+        setEditingText(null);
+        setFocusTuning(false);
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        editingTextRef.current = raw;
+        setEditingText(raw);
+        const trimmed = raw.trim();
+        if (trimmed === '' || trimmed === '-') return;
+        const next = Number(trimmed);
+        if (!Number.isFinite(next)) return;
+        commitToParent(next);
+      }}
+      className={className}
+    />
+  );
+};
+
+/** Input angka — scroll hover saat Preview Sementara, scroll fokus saat normal */
+const ElimNumberInput = ({
+  value,
+  onChange,
+  className,
+  previewMode = false,
+  onWheelTuningChange,
+  onFocusTuningChange,
+}: {
+  value: number;
+  onChange: (val: number) => void;
+  className?: string;
+  previewMode?: boolean;
+  onWheelTuningChange?: (active: boolean) => void;
+  onFocusTuningChange?: (active: boolean) => void;
+}) =>
+  previewMode ? (
+    <ElimBannerLayoutInput
+      previewMode
+      value={value}
+      onChange={onChange}
+      className={className}
+      onWheelTuningChange={onWheelTuningChange}
+      onFocusTuningChange={onFocusTuningChange}
+    />
+  ) : (
+    <ScrollableInput value={value} onChange={onChange} className={className} />
+  );
+
 const deriveTeamAbbreviation = (teamName: string): string => {
   const trimmed = teamName.trim();
   if (!trimmed) return '---';
@@ -303,6 +579,14 @@ const getLeaderboardTeamLabel = (team: Pick<Team, 'team' | 'teamAbbreviation'>, 
   const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamAbbreviation;
   if (fromDb?.trim()) return fromDb.trim().toUpperCase();
   return deriveTeamAbbreviation(team.team);
+};
+
+const resolveLeaderboardTeamLogo = (
+  team: Pick<Team, 'team' | 'teamLogo'>,
+  projectPlayers: PlayerData[] = []
+): string => {
+  const fromDb = projectPlayers.find((p) => p.team === team.team)?.teamLogo?.trim();
+  return fromDb || team.teamLogo?.trim() || '';
 };
 
 const ensureTeamAbbreviation = (team: Team, projectPlayers: PlayerData[] = []): Team => {
@@ -501,9 +785,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     INITIAL_VISUAL_CONFIG
   );
 
+  const [elimBannerPreviewRevision, setElimBannerPreviewRevision] = useState(0);
+  const elimBannerTuningVisualRef = useRef<EliminationBannerVisual | null>(null);
+  const bumpElimBannerPreview = useCallback(
+    () => setElimBannerPreviewRevision((n) => n + 1),
+    []
+  );
+
   const elimBannerVisual = useMemo(
-    () => pickEliminationBannerVisual(visualConfig),
-    [visualConfig]
+    () =>
+      elimBannerTuningVisualRef.current ?? pickEliminationBannerVisual(visualConfig),
+    [visualConfig, elimBannerPreviewRevision]
   );
 
   const elimBannerTypography = useMemo(
@@ -512,8 +804,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   );
 
   const elimBannerFontFamilyId = useMemo(
-    () => resolveEliminationBannerFontFamilyId(visualConfig.elimBannerFontFamily),
-    [visualConfig.elimBannerFontFamily]
+    () => resolveEliminationBannerFontFamilyId(elimBannerVisual.elimBannerFontFamily),
+    [elimBannerVisual.elimBannerFontFamily]
   );
 
   useEffect(() => {
@@ -560,65 +852,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   };
 
   const fullLayout =
-    visualConfig.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
-
-  const patchElimBannerTypography = (key: EliminationBannerFontKey, value: number) => {
-    setVisualConfig((prev) => {
-      const typo = {
-        ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
-        ...prev.elimBannerTypography,
-        [key]: value,
-      };
-      const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
-      const nextLayout = { ...current };
-      if (key === 'placement') {
-        nextLayout.placement = { ...current.placement, fontSize: value };
-      }
-      if (key === 'tag') {
-        nextLayout.teamName = { ...current.teamName, fontSize: value };
-      }
-      return {
-        ...prev,
-        elimBannerTypography: typo,
-        elimBannerFullLayout:
-          key === 'placement' || key === 'tag' ? nextLayout : current,
-      };
-    });
-  };
-
-  const patchElimBannerFullLayout = <
-    K extends keyof EliminationBannerFullOverlayLayout,
-  >(
-    section: K,
-    patch: Partial<EliminationBannerFullOverlayLayout[K]>
-  ) => {
-    setVisualConfig((prev) => {
-      const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
-      const nextSection = { ...current[section], ...patch };
-      const nextLayout = {
-        ...current,
-        [section]: nextSection,
-      };
-      const typo = {
-        ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
-        ...prev.elimBannerTypography,
-      };
-      if (section === 'placement' && patch.fontSize !== undefined) {
-        typo.placement = patch.fontSize;
-      }
-      if (section === 'teamName' && patch.fontSize !== undefined) {
-        typo.tag = patch.fontSize;
-      }
-      const typoChanged =
-        (section === 'placement' && patch.fontSize !== undefined) ||
-        (section === 'teamName' && patch.fontSize !== undefined);
-      return {
-        ...prev,
-        elimBannerFullLayout: nextLayout,
-        ...(typoChanged ? { elimBannerTypography: typo } : {}),
-      };
-    });
-  };
+    elimBannerVisual.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
 
   const [layoutConfig, setLayoutConfig] = useSharedState<LayoutConfig>('BROHUBS_LEADERBOARD_LAYOUT', {
       scale: 80,
@@ -675,6 +909,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     'BROHUBS_ELIMINATION_BANNER_LAYOUT',
     DEFAULT_ELIMINATION_BANNER_LAYOUT
   );
+  const elimBannerLayoutRef = useRef(elimBannerLayout);
+  useEffect(() => {
+    elimBannerLayoutRef.current = elimBannerLayout;
+  }, [elimBannerLayout]);
 
   const [animationConfig, setAnimationConfig] = useSharedState<AnimationConfig>('BROHUBS_LEADERBOARD_ANIMATION', {
       mode: 'default',
@@ -807,6 +1045,20 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const aliveCount = aliveTeams.length;
   const teamsInContention = getTeamsInContention(teams);
   const contentionCount = teamsInContention.length;
+  /** Tim masih di match ini (belum placement, belum full elim) */
+  const survivingMatchTeams = useMemo(
+    () =>
+      teams.filter(
+        (t) =>
+          t.active &&
+          t.placementRank === null &&
+          !t.status.every((s) => s === 0)
+      ),
+    [teams]
+  );
+  const survivingMatchCount = survivingMatchTeams.length;
+  /** Match berjalan & tepat 4 tim masih hidup — bar final 4 dari atas, klasemen kanan keluar */
+  const showFinalFourOverlay = survivingMatchCount === FINAL_FOUR_ALIVE_COUNT;
   /** Bisa lanjut match berikutnya jika tersisa ≤2 tim tanpa placement (WWCD / top 2) */
   const isMatchReadyToEnd = contentionCount <= 2;
   const matchWinnerCandidate = useMemo(() => {
@@ -847,7 +1099,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     );
     setTimeout(() => {
       setActivePopups((prev) => prev.filter((r) => r !== next.teamRank));
-    }, 4000);
+    }, ELIMINATED_POPUP_HOLD_MS);
 
     if (eliminationClearTimerRef.current) {
       clearTimeout(eliminationClearTimerRef.current);
@@ -903,6 +1155,86 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
+  /** Draft posisi/scale saat Preview Sementara — hindari write storage tiap scroll (glitch) */
+  const [elimBannerTuningLayout, setElimBannerTuningLayout] =
+    useState<EliminationBannerLayout | null>(null);
+  const elimBannerTuningLayoutRef = useRef<EliminationBannerLayout | null>(null);
+  const stagedElimCompanionPushedRef = useRef(false);
+  const [elimBannerTuningActive, setElimBannerTuningActive] = useState(false);
+  const elimBannerWheelTuningRef = useRef(false);
+  const elimBannerFocusTuningRef = useRef(false);
+  const elimBannerPreviewWrapRef = useRef<HTMLDivElement>(null);
+  const elimBannerInlinePreviewWrapRef = useRef<HTMLDivElement>(null);
+  const elimBannerTuningLiveRef = useRef<EliminationBannerLayout>(DEFAULT_ELIMINATION_BANNER_LAYOUT);
+  const [frozenStagedElimAlert, setFrozenStagedElimAlert] = useState<TeamEliminationAlert | null>(
+    null
+  );
+
+  const syncElimBannerTuningActive = useCallback(() => {
+    setElimBannerTuningActive(
+      elimBannerWheelTuningRef.current || elimBannerFocusTuningRef.current
+    );
+  }, []);
+
+  const applyElimBannerPreviewTransform = useCallback((layout: EliminationBannerLayout) => {
+    for (const el of [
+      elimBannerPreviewWrapRef.current,
+      elimBannerInlinePreviewWrapRef.current,
+    ]) {
+      if (el) applyElimBannerTransformToElement(el, layout);
+    }
+  }, []);
+
+  const applyElimBannerLayoutLive = useCallback(
+    (layout: EliminationBannerLayout) => {
+      elimBannerTuningLiveRef.current = layout;
+      applyElimBannerPreviewTransform(layout);
+    },
+    [applyElimBannerPreviewTransform]
+  );
+
+  const commitElimBannerTuningLayout = useCallback(
+    (layout: EliminationBannerLayout, options?: { deferState?: boolean }) => {
+      applyElimBannerLayoutLive(layout);
+      if (!options?.deferState) {
+        setElimBannerTuningLayout(layout);
+      }
+    },
+    [applyElimBannerLayoutLive]
+  );
+
+  const commitElimBannerVisualDraftToConfig = useCallback(() => {
+    const draft = elimBannerTuningVisualRef.current;
+    if (!draft) return;
+    setVisualConfig((prev) => ({
+      ...prev,
+      ...draft,
+      elimBannerTypography: draft.elimBannerTypography,
+      elimBannerFullLayout: draft.elimBannerFullLayout,
+    }));
+  }, [setVisualConfig]);
+
+  const mutateElimBannerVisualDraft = useCallback(
+    (mutate: (picked: EliminationBannerVisual) => EliminationBannerVisual) => {
+      const base =
+        elimBannerTuningVisualRef.current ?? pickEliminationBannerVisual(visualConfig);
+      const next = mutate(base);
+      elimBannerTuningVisualRef.current = next;
+      bumpElimBannerPreview();
+    },
+    [visualConfig, bumpElimBannerPreview]
+  );
+
+  const patchElimBannerVisualField = useCallback(
+    <K extends keyof EliminationBannerVisual>(key: K, value: EliminationBannerVisual[K]) => {
+      if (elimBannerHoldPreview) {
+        mutateElimBannerVisualDraft((picked) => ({ ...picked, [key]: value }));
+        return;
+      }
+      setVisualConfig((prev) => ({ ...prev, [key]: value }));
+    },
+    [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]
+  );
 
   const clearPreviewEliminationState = useCallback(() => {
     setEliminationAlert(null);
@@ -913,28 +1245,81 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     }
   }, [pushEliminationToCompanion, setEliminationAlert]);
 
-  const setElimBannerHoldPreviewSafe = useCallback(
-    (on: boolean) => {
-      setElimBannerHoldPreview(on);
-      if (!on) clearPreviewEliminationState();
-    },
-    [clearPreviewEliminationState]
-  );
+  useEffect(() => {
+    elimBannerTuningLayoutRef.current = elimBannerTuningLayout;
+  }, [elimBannerTuningLayout]);
 
-  const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert | null => {
+  const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert => {
+    if (teams.length === 0) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
     const teamIndex = teams.findIndex((t) => t.active && !t.status.every((s) => s === 0));
     const idx = teamIndex >= 0 ? teamIndex : 0;
-    const alert = buildTeamEliminationAlert(idx, teams[idx]?.placementRank ?? 6, teams);
-    if (!alert) return null;
+    const team = teams[idx];
+    if (!team) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
+    const placementRank =
+      team.placementRank ?? Math.min(16, Math.max(1, 17 - (team.rank || idx + 1)));
+    const alert = buildTeamEliminationAlert(idx, placementRank, teams);
+    if (!alert) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
     return { ...alert, id: STAGED_ELIM_PREVIEW_ALERT_ID, at: 0 };
   }, [buildTeamEliminationAlert, teams]);
 
-  const stagedElimPreviewAlert = useMemo(
-    () => (elimBannerHoldPreview ? buildStagedElimPreviewAlert() : null),
-    [elimBannerHoldPreview, buildStagedElimPreviewAlert]
+  const setElimBannerHoldPreviewSafe = useCallback(
+    (on: boolean) => {
+      if (on) {
+        const seed = { ...elimBannerLayout };
+        setElimBannerTuningLayout(seed);
+        elimBannerTuningLiveRef.current = seed;
+        elimBannerTuningVisualRef.current = pickEliminationBannerVisual(visualConfig);
+        bumpElimBannerPreview();
+        stagedElimCompanionPushedRef.current = false;
+        setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
+        setElimBannerHoldPreview(true);
+        return;
+      }
+      const tuning = elimBannerTuningLayoutRef.current ?? elimBannerTuningLiveRef.current;
+      if (tuning) {
+        setElimBannerLayout(tuning);
+      }
+      commitElimBannerVisualDraftToConfig();
+      elimBannerTuningVisualRef.current = null;
+      bumpElimBannerPreview();
+      setElimBannerTuningLayout(null);
+      elimBannerWheelTuningRef.current = false;
+      elimBannerFocusTuningRef.current = false;
+      setElimBannerTuningActive(false);
+      stagedElimCompanionPushedRef.current = false;
+      setElimBannerHoldPreview(false);
+      clearPreviewEliminationState();
+    },
+    [
+      buildStagedElimPreviewAlert,
+      bumpElimBannerPreview,
+      clearPreviewEliminationState,
+      commitElimBannerVisualDraftToConfig,
+      elimBannerLayout,
+      setElimBannerLayout,
+      visualConfig,
+    ]
   );
 
-  const displayElimAlert = elimBannerHoldPreview ? stagedElimPreviewAlert : eliminationAlert;
+  /** Nilai untuk input — state (bukan ref) agar tidak stale; ref dipakai untuk transform DOM realtime */
+  const elimBannerLayoutForInputs = elimBannerHoldPreview
+    ? (elimBannerTuningLayout ?? elimBannerLayout)
+    : elimBannerLayout;
+
+  const effectiveElimBannerLayout = elimBannerLayoutForInputs;
+
+  useEffect(() => {
+    if (!elimBannerHoldPreview) {
+      setFrozenStagedElimAlert(null);
+      return;
+    }
+    setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
+    // Hanya snapshot saat Preview Sementara dinyalakan — jangan rebuild tiap perubahan teams
+  }, [elimBannerHoldPreview]);
+
+  const displayElimAlert = elimBannerHoldPreview
+    ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
+    : eliminationAlert;
   const elimBannerIsPanelsMode = visualConfig.elimBannerDesignMode !== 'full';
   const elimBannerPanelSwitchLocked = elimBannerHoldPreview && !elimBannerIsPanelsMode;
   const elimBannerCustomSwitchLocked = elimBannerHoldPreview && elimBannerIsPanelsMode;
@@ -951,27 +1336,214 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const elimBannerDesignSwitchLockTitle =
     'Matikan Preview Sementara untuk mengganti opsi ini';
 
-  const elimBannerPositionStyle = useMemo(
-    (): React.CSSProperties => ({
-      left: `calc(50% + ${elimBannerLayout.xOffset}px)`,
-      top: `${elimBannerLayout.yOffset}px`,
-      transform: `translateX(-50%) scale(${elimBannerLayout.scale / 100})`,
+  const elimBannerPositionStyle = useMemo((): React.CSSProperties => {
+    if (elimBannerHoldPreview) {
+      return { willChange: 'transform, top, left' };
+    }
+    return {
+      left: `calc(50% + ${effectiveElimBannerLayout.xOffset}px)`,
+      top: `${effectiveElimBannerLayout.yOffset}px`,
+      transform: `translateX(-50%) scale(${effectiveElimBannerLayout.scale / 100})`,
       transformOrigin: 'top center',
-    }),
-    [elimBannerLayout.scale, elimBannerLayout.xOffset, elimBannerLayout.yOffset]
-  );
+    };
+  }, [
+    effectiveElimBannerLayout.scale,
+    effectiveElimBannerLayout.xOffset,
+    effectiveElimBannerLayout.yOffset,
+    elimBannerHoldPreview,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!elimBannerHoldPreview) return;
+    applyElimBannerPreviewTransform(elimBannerTuningLiveRef.current);
+  }, [
+    elimBannerHoldPreview,
+    applyElimBannerPreviewTransform,
+    elimBannerTuningLayout,
+    elimBannerPreviewRevision,
+  ]);
+
+  const flushElimBannerTuningLayoutState = useCallback(() => {
+    if (!elimBannerHoldPreview) return;
+    const live = elimBannerTuningLiveRef.current;
+    setElimBannerTuningLayout((prev) => {
+      if (
+        prev &&
+        prev.scale === live.scale &&
+        prev.xOffset === live.xOffset &&
+        prev.yOffset === live.yOffset
+      ) {
+        return prev;
+      }
+      return { ...live };
+    });
+  }, [elimBannerHoldPreview]);
+
+  useEffect(() => {
+    if (!elimBannerHoldPreview || elimBannerTuningActive) return;
+    flushElimBannerTuningLayoutState();
+  }, [elimBannerHoldPreview, elimBannerTuningActive, flushElimBannerTuningLayoutState]);
 
   const patchElimBannerLayout = useCallback(
     (patch: Partial<EliminationBannerLayout>) => {
+      if (elimBannerHoldPreview) {
+        const next = { ...elimBannerTuningLiveRef.current, ...patch };
+        commitElimBannerTuningLayout(next, {
+          deferState: elimBannerTuningActive,
+        });
+        if (!elimBannerTuningActive) {
+          setElimBannerTuningLayout(next);
+        }
+        return;
+      }
       setElimBannerLayout((prev) => ({ ...prev, ...patch }));
     },
-    [setElimBannerLayout]
+    [
+      elimBannerHoldPreview,
+      elimBannerTuningActive,
+      commitElimBannerTuningLayout,
+      setElimBannerLayout,
+    ]
+  );
+
+  const patchElimBannerTypography = useCallback(
+    (key: EliminationBannerFontKey, value: number) => {
+      if (elimBannerHoldPreview) {
+        mutateElimBannerVisualDraft((picked) => {
+          const typo = {
+            ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+            ...picked.elimBannerTypography,
+            [key]: value,
+          };
+          const current =
+            picked.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+          const nextLayout = { ...current };
+          if (key === 'placement') {
+            nextLayout.placement = { ...current.placement, fontSize: value };
+          }
+          if (key === 'tag') {
+            nextLayout.teamName = { ...current.teamName, fontSize: value };
+          }
+          return {
+            ...picked,
+            elimBannerTypography: typo,
+            elimBannerFullLayout:
+              key === 'placement' || key === 'tag' ? nextLayout : current,
+          };
+        });
+        return;
+      }
+      setVisualConfig((prev) => {
+        const typo = {
+          ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+          ...prev.elimBannerTypography,
+          [key]: value,
+        };
+        const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+        const nextLayout = { ...current };
+        if (key === 'placement') {
+          nextLayout.placement = { ...current.placement, fontSize: value };
+        }
+        if (key === 'tag') {
+          nextLayout.teamName = { ...current.teamName, fontSize: value };
+        }
+        return {
+          ...prev,
+          elimBannerTypography: typo,
+          elimBannerFullLayout:
+            key === 'placement' || key === 'tag' ? nextLayout : current,
+        };
+      });
+    },
+    [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]
+  );
+
+  const patchElimBannerFullLayout = useCallback(
+    <
+      K extends keyof EliminationBannerFullOverlayLayout,
+    >(
+      section: K,
+      patch: Partial<EliminationBannerFullOverlayLayout[K]>
+    ) => {
+      if (elimBannerHoldPreview) {
+        mutateElimBannerVisualDraft((picked) => {
+          const current =
+            picked.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+          const nextSection = { ...current[section], ...patch };
+          const nextLayout = { ...current, [section]: nextSection };
+          const typo = {
+            ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+            ...picked.elimBannerTypography,
+          };
+          if (section === 'placement' && patch.fontSize !== undefined) {
+            typo.placement = patch.fontSize;
+          }
+          if (section === 'teamName' && patch.fontSize !== undefined) {
+            typo.tag = patch.fontSize;
+          }
+          const typoChanged =
+            (section === 'placement' && patch.fontSize !== undefined) ||
+            (section === 'teamName' && patch.fontSize !== undefined);
+          return {
+            ...picked,
+            elimBannerFullLayout: nextLayout,
+            ...(typoChanged ? { elimBannerTypography: typo } : {}),
+          };
+        });
+        return;
+      }
+      setVisualConfig((prev) => {
+        const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+        const nextSection = { ...current[section], ...patch };
+        const nextLayout = { ...current, [section]: nextSection };
+        const typo = {
+          ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+          ...prev.elimBannerTypography,
+        };
+        if (section === 'placement' && patch.fontSize !== undefined) {
+          typo.placement = patch.fontSize;
+        }
+        if (section === 'teamName' && patch.fontSize !== undefined) {
+          typo.tag = patch.fontSize;
+        }
+        const typoChanged =
+          (section === 'placement' && patch.fontSize !== undefined) ||
+          (section === 'teamName' && patch.fontSize !== undefined);
+        return {
+          ...prev,
+          elimBannerFullLayout: nextLayout,
+          ...(typoChanged ? { elimBannerTypography: typo } : {}),
+        };
+      });
+    },
+    [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]
+  );
+
+  const handleElimBannerWheelTuning = useCallback(
+    (active: boolean) => {
+      elimBannerWheelTuningRef.current = active;
+      syncElimBannerTuningActive();
+      if (!active) {
+        flushElimBannerTuningLayoutState();
+      }
+    },
+    [syncElimBannerTuningActive, flushElimBannerTuningLayoutState]
+  );
+
+  const handleElimBannerFocusTuning = useCallback(
+    (active: boolean) => {
+      elimBannerFocusTuningRef.current = active;
+      syncElimBannerTuningActive();
+      if (!active) {
+        flushElimBannerTuningLayoutState();
+      }
+    },
+    [syncElimBannerTuningActive, flushElimBannerTuningLayoutState]
   );
 
   const previewEliminationBanner = useCallback(() => {
     if (elimBannerHoldPreview) return;
     const base = buildStagedElimPreviewAlert();
-    if (!base) return;
     const alert = { ...base, id: createEventId() };
     setEliminationAlert(alert);
     pushEliminationToCompanion(alert);
@@ -990,29 +1562,32 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   ]);
 
   useEffect(() => {
-    if (elimBannerHoldPreview) {
-      elimBannerHoldPreviewPrevRef.current = true;
-      if (eliminationClearTimerRef.current) {
-        clearTimeout(eliminationClearTimerRef.current);
-        eliminationClearTimerRef.current = null;
+    if (!elimBannerHoldPreview) {
+      if (elimBannerHoldPreviewPrevRef.current) {
+        elimBannerHoldPreviewPrevRef.current = false;
       }
-      if (visualOnly) return;
-      const alert = buildStagedElimPreviewAlert();
-      if (alert) pushEliminationToCompanion(alert);
       return;
     }
 
-    if (elimBannerHoldPreviewPrevRef.current) {
-      elimBannerHoldPreviewPrevRef.current = false;
-      clearPreviewEliminationState();
+    elimBannerHoldPreviewPrevRef.current = true;
+    if (eliminationClearTimerRef.current) {
+      clearTimeout(eliminationClearTimerRef.current);
+      eliminationClearTimerRef.current = null;
+    }
+    if (visualOnly) return;
+
+    if (!stagedElimCompanionPushedRef.current) {
+      const alert = buildStagedElimPreviewAlert();
+      if (alert) {
+        pushEliminationToCompanion(alert);
+        stagedElimCompanionPushedRef.current = true;
+      }
     }
   }, [
     elimBannerHoldPreview,
     buildStagedElimPreviewAlert,
-    teams,
     pushEliminationToCompanion,
     visualOnly,
-    clearPreviewEliminationState,
   ]);
 
   useEffect(() => {
@@ -1265,10 +1840,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     setFraggers(buildTopFraggersFromMatch(teams, projectPlayers, 5));
   }, [teams, projectPlayers, aliveCount, currentMatch, setFraggers, visualOnly]);
 
-  // Push team / layout / visual ke OBS (debounce — ringan saat Preview Sementara agar tidak glitch)
+  // Push team / layout / visual ke OBS (normal — tidak saat Preview Sementara)
   useEffect(() => {
-    if (visualOnly) return;
-    const delay = elimBannerHoldPreview ? 80 : 400;
+    if (visualOnly || elimBannerHoldPreview) return;
     const timer = setTimeout(() => {
       notifyCompanionData({
         assetId: asset.id,
@@ -1285,7 +1859,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           BROHUBS_TOPFRAGGERS_DATA: fraggers,
         },
       });
-    }, delay);
+    }, 400);
     return () => clearTimeout(timer);
   }, [
     asset.id,
@@ -1300,6 +1874,31 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     visualOnly,
     elimBannerHoldPreview,
     projectPlayers,
+  ]);
+
+  // Preview Sementara: sync layout/visual setelah scroll berhenti (tidak saat wheel aktif)
+  useEffect(() => {
+    if (visualOnly || !elimBannerHoldPreview || elimBannerTuningActive) return;
+    const previewVisual = elimBannerTuningVisualRef.current;
+    const timer = setTimeout(() => {
+      notifyCompanionData({
+        assetId: asset.id,
+        data: {
+          BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
+          BROHUBS_LEADERBOARD_VISUAL: previewVisual
+            ? { ...visualConfig, ...previewVisual }
+            : visualConfig,
+        },
+      });
+    }, 380);
+    return () => clearTimeout(timer);
+  }, [
+    asset.id,
+    visualOnly,
+    elimBannerHoldPreview,
+    elimBannerTuningActive,
+    elimBannerPreviewRevision,
+    visualConfig,
   ]);
 
   const handleResetCurrentMatch = () => {
@@ -1560,6 +2159,32 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       });
   }, [teams, tieBreakerOrder, killPointValue]);
 
+  const showElimsColumn = useMemo(
+    () =>
+      currentMatch > 1 &&
+      sortedPreviewTeams.some(
+        (team) => team.playerKills.reduce((sum, kills) => sum + kills, 0) > 0
+      ),
+    [currentMatch, sortedPreviewTeams]
+  );
+
+  const finalFourTeamsData = useMemo(() => {
+    if (!showFinalFourOverlay) return [];
+    return survivingMatchTeams
+      .map((t) => {
+        const overallIdx = sortedPreviewTeams.findIndex((st) => st.rank === t.rank);
+        return {
+          rank: t.rank,
+          teamName: t.team.trim() || getLeaderboardTeamLabel(t, projectPlayers),
+          teamLogo: resolveLeaderboardTeamLogo(t, projectPlayers),
+          alivePlayers: countAlivePlayers(t.status),
+          wwcdPosition: overallIdx >= 0 ? overallIdx + 1 : null,
+          totalWwcds: t.totalWwcds,
+        };
+      })
+      .sort((a, b) => (a.wwcdPosition ?? 99) - (b.wwcdPosition ?? 99));
+  }, [showFinalFourOverlay, survivingMatchTeams, sortedPreviewTeams, projectPlayers]);
+
   const getAssetAnimationVariants = useCallback(() => {
     return getAnimationVariants(effectiveAnimationConfig);
   }, [effectiveAnimationConfig]);
@@ -1636,9 +2261,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const leaderboardOverlayPanel = useMemo(() => {
     if (!showOverlay) return null;
 
-    const showElimsColumn =
-      currentMatch > 1 &&
-      sortedPreviewTeams.some((team) => team.playerKills.reduce((sum, kills) => sum + kills, 0) > 0);
+    const overlayPanelWidth =
+      leaderboardPanelWidth +
+      (showElimsColumn ? LEADERBOARD_ELIMS_PANEL_EXTRA_PX : 0);
 
     const panelHasBgImage = hasLeaderboardBgImage(
       visualConfig.leaderboardPanelBgImage,
@@ -1649,7 +2274,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
          <div 
            className="absolute right-0 flex flex-col justify-start origin-right max-w-full"
            style={{ 
-             width: `${leaderboardPanelWidth}px`,
+             width: `${overlayPanelWidth}px`,
              right: `${-layoutConfig.xOffset}px`,
              top: `${layoutConfig.yOffset}px`,
              transformOrigin: 'right top',
@@ -1714,17 +2339,37 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                         transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
                       }}
                     >
-                      <span className={`text-center shrink-0 ${showElimsColumn ? 'w-16' : 'w-20'}`}>
+                      <span
+                        className="inline-flex items-center justify-center shrink-0"
+                        style={{
+                          width: LEADERBOARD_ELIMS_STATUS_WIDTH_PX,
+                          transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                        }}
+                      >
                         Status
                       </span>
-                      <span className={`text-right shrink-0 ${showElimsColumn ? 'w-12' : 'w-20'}`}>
+                      <span
+                        className="text-right inline-flex items-center justify-end shrink-0"
+                        style={{
+                          width: LEADERBOARD_ELIMS_PTS_WIDTH_PX,
+                          transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                        }}
+                      >
                         Pts
                       </span>
-                      {showElimsColumn && (
-                        <span className="w-9 text-center shrink-0 translate-x-3 animate-in fade-in duration-300">
-                          Elims
-                        </span>
-                      )}
+                      <div
+                        className="shrink-0 overflow-hidden flex items-center justify-center"
+                        style={{
+                          width: showElimsColumn ? LEADERBOARD_ELIMS_COLUMN_WIDTH_PX : 0,
+                          maxWidth: showElimsColumn ? LEADERBOARD_ELIMS_COLUMN_WIDTH_PX : 0,
+                          opacity: showElimsColumn ? 1 : 0,
+                          transform: showElimsColumn ? 'translateX(12px)' : 'translateX(24px)',
+                          transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                        }}
+                        aria-hidden={!showElimsColumn}
+                      >
+                        <span className="text-center whitespace-nowrap">Elims</span>
+                      </div>
                     </div>
                  </div>
               </div>
@@ -1780,30 +2425,87 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                       }}
                     >
                        {isTeamEliminated && (
-                          <div className="absolute inset-0 flex items-center justify-center overflow-hidden pointer-events-none z-0">
-                              <span className="text-[40px] font-[1000] uppercase tracking-[0.5em] opacity-10 transform -rotate-3 whitespace-nowrap" style={{ color: visualConfig.eliminatedText }}>
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 0.75, ease: ELIMINATED_POPUP_EASE_IN }}
+                            className="absolute inset-0 flex items-center justify-center overflow-hidden pointer-events-none z-0"
+                          >
+                              <motion.span
+                                initial={{ opacity: 0, scale: 1.08, rotate: -6 }}
+                                animate={{ opacity: 0.1, scale: 1, rotate: -3 }}
+                                transition={{ duration: 0.9, ease: ELIMINATED_POPUP_EASE_IN, delay: 0.15 }}
+                                className="text-[40px] font-[1000] uppercase tracking-[0.5em] whitespace-nowrap"
+                                style={{ color: visualConfig.eliminatedText }}
+                              >
                                   ELIMINATED
-                              </span>
-                          </div>
+                              </motion.span>
+                          </motion.div>
                        )}
 
-                       {showPopup && (
-                           <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none overflow-hidden animate-out fade-out zoom-out duration-500 fill-mode-forwards" style={{ animationDelay: '2.5s' }}>
-                               <div className="bg-red-600/90 text-white font-[900] text-3xl uppercase tracking-[0.2em] px-8 py-1 transform -rotate-2 border-y-2 border-white shadow-xl animate-in zoom-in duration-300">
-                                   ELIMINATED
-                               </div>
-                           </div>
-                       )}
+                       <AnimatePresence>
+                         {showPopup && (
+                           <motion.div
+                             key={`elim-popup-${t.rank}`}
+                             className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none overflow-hidden"
+                             initial={{ opacity: 0 }}
+                             animate={{ opacity: 1 }}
+                             exit={{
+                               opacity: 0,
+                               transition: { duration: 0.55, ease: ELIMINATED_POPUP_EASE_OUT },
+                             }}
+                           >
+                             <motion.div
+                               initial={{
+                                 opacity: 0,
+                                 scale: 0.55,
+                                 rotate: -10,
+                                 y: 16,
+                                 filter: 'blur(6px)',
+                               }}
+                               animate={{
+                                 opacity: 1,
+                                 scale: 1,
+                                 rotate: -2,
+                                 y: 0,
+                                 filter: 'blur(0px)',
+                                 transition: {
+                                   duration: 0.5,
+                                   ease: ELIMINATED_POPUP_EASE_IN,
+                                 },
+                               }}
+                               exit={{
+                                 opacity: 0,
+                                 scale: 0.88,
+                                 rotate: 5,
+                                 y: -14,
+                                 filter: 'blur(8px)',
+                                 transition: {
+                                   duration: 0.85,
+                                   ease: ELIMINATED_POPUP_EASE_OUT,
+                                   opacity: { duration: 0.7 },
+                                   filter: { duration: 0.75 },
+                                 },
+                               }}
+                               className="bg-red-600/90 text-white font-[900] text-3xl uppercase tracking-[0.2em] px-8 py-1 border-y-2 border-white shadow-xl"
+                             >
+                               ELIMINATED
+                             </motion.div>
+                           </motion.div>
+                         )}
+                       </AnimatePresence>
                        
                        {isWinner && (
                            <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none overflow-hidden">
                                <div className="bg-black/90 text-[#ccff00] font-[900] text-3xl uppercase tracking-[0.2em] px-8 py-1 border-y-2 border-[#ccff00] shadow-xl animate-pulse">
-                                   WINNER
+                                   WWCD
                                </div>
                            </div>
                        )}
 
-                       <div className={`flex items-center gap-4 flex-1 min-w-0 mr-2 pr-1 transition-opacity duration-500 relative z-10 ${isTeamEliminated ? 'opacity-40 grayscale' : 'opacity-100'}`}>
+                       <div
+                         className={`flex items-center gap-4 flex-1 min-w-0 mr-2 pr-1 relative z-10 transition-[opacity,filter] duration-700 ease-out ${isTeamEliminated ? 'opacity-40 grayscale' : 'opacity-100'}`}
+                       >
                           <span className="font-[900] text-xl w-8 text-center" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.rankColor }}>#{idx + 1}</span>
                           
                           <div
@@ -1840,13 +2542,19 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                        </div>
 
                        <div
-                         className={`flex items-center shrink-0 gap-2 relative z-10 ${isTeamEliminated ? 'opacity-20' : 'opacity-100'}`}
+                         className={`flex items-center shrink-0 gap-2 relative z-10 transition-opacity duration-700 ease-out ${isTeamEliminated ? 'opacity-20' : 'opacity-100'}`}
                          style={{
                            marginRight: visualConfig.showFlags ? -4 : 0,
                            transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
                          }}
                        >
-                         <div className="flex flex-col items-center shrink-0">
+                         <div
+                           className="flex flex-col items-center justify-center shrink-0"
+                           style={{
+                             width: LEADERBOARD_ELIMS_STATUS_WIDTH_PX,
+                             transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                           }}
+                         >
                             <div className="flex gap-1.5">
                                 {t.status.map((s, i) => (
                                   <div key={i} className="w-3.5 h-7 rounded-full border shadow-sm transition-colors flex items-center justify-center" style={{ backgroundColor: getStatusColor(s), borderColor: `${visualConfig.statusBorder}20` }}>
@@ -1856,19 +2564,31 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                             </div>
                          </div>
 
-                         <div className={`text-right flex items-center justify-end shrink-0 ${showElimsColumn ? 'w-12' : 'w-20'}`}>
+                         <div
+                           className="text-right flex items-center justify-end shrink-0"
+                           style={{
+                             width: LEADERBOARD_ELIMS_PTS_WIDTH_PX,
+                             transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                           }}
+                         >
                             <span className="font-[900] text-2xl leading-none" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.pointsColor }}>{displayedPts}</span>
                          </div>
 
-                         {showElimsColumn && (
-                           <div className="w-9 shrink-0 flex items-center justify-center translate-x-1">
-                              <span
-                                className={`font-black text-sm tracking-tight leading-none tabular-nums text-black ${currentKills > 0 ? 'animate-in fade-in duration-300' : ''}`}
-                              >
-                                {currentKills}
-                              </span>
-                           </div>
-                         )}
+                         <div
+                           className="shrink-0 overflow-hidden flex items-center justify-center"
+                           style={{
+                             width: showElimsColumn ? LEADERBOARD_ELIMS_COLUMN_WIDTH_PX : 0,
+                             maxWidth: showElimsColumn ? LEADERBOARD_ELIMS_COLUMN_WIDTH_PX : 0,
+                             opacity: showElimsColumn ? 1 : 0,
+                             transform: showElimsColumn ? 'translateX(4px)' : 'translateX(16px)',
+                             transition: LEADERBOARD_ELIMS_LAYOUT_TRANSITION,
+                           }}
+                           aria-hidden={!showElimsColumn}
+                         >
+                           <span className="font-black text-sm tracking-tight leading-none tabular-nums text-black">
+                             {currentKills}
+                           </span>
+                         </div>
                        </div>
                     </motion.div>
                  );
@@ -1908,6 +2628,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     );
   }, [
     showOverlay,
+    showFinalFourOverlay,
+    showElimsColumn,
     layoutConfig,
     leaderboardPanelWidth,
     visualConfig,
@@ -1923,7 +2645,161 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     rowVariants,
     bottomBoxVariants,
     projectPlayers,
+    contentionCount,
   ]);
+
+  const finalFourOverlayPanel = useMemo(() => {
+    if (!showOverlay || !showFinalFourOverlay || finalFourTeamsData.length === 0) {
+      return null;
+    }
+
+    return (
+      <div
+        className="absolute left-0 right-0 flex justify-center pointer-events-none z-[400] px-10"
+        style={{
+          top: `${FINAL_FOUR_TOP_OFFSET_PX}px`,
+          fontFamily: leaderboardFontFamily,
+        }}
+      >
+        <div
+          className="flex flex-row items-stretch justify-center gap-4 w-full max-w-[1680px]"
+          style={{ scale: layoutConfig.scale / 100, transformOrigin: 'top center' }}
+        >
+          {finalFourTeamsData.map((entry, idx) => (
+            <motion.div
+              key={entry.rank}
+              custom={idx}
+              initial={{ y: -72, opacity: 0, scale: 0.92 }}
+              animate={{
+                y: 0,
+                opacity: 1,
+                scale: 1,
+                transition: {
+                  delay: 0.12 + idx * 0.07,
+                  duration: 0.55,
+                  ease: FINAL_FOUR_ENTER_EASE,
+                },
+              }}
+              exit={{
+                y: -48,
+                opacity: 0,
+                scale: 0.94,
+                transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+              }}
+              className="flex-1 min-w-0 max-w-[400px] flex flex-col items-center rounded-2xl border-2 border-black/20 shadow-2xl overflow-hidden"
+              style={resolveLeaderboardSurfaceStyle(
+                visualConfig.headerBg,
+                visualConfig.leaderboardPanelBgImage,
+                visualConfig
+              )}
+            >
+              <div
+                className="w-full flex flex-col items-center px-4 pt-5 pb-4 gap-3"
+                style={resolveLeaderboardSurfaceStyle(
+                  idx % 2 === 0 ? visualConfig.rowEvenBg : visualConfig.rowOddBg,
+                  idx % 2 === 0 ? visualConfig.rowEvenBgImage : visualConfig.rowOddBgImage,
+                  visualConfig
+                )}
+              >
+                <div
+                  className="flex items-center justify-center overflow-hidden shrink-0 rounded-xl border border-black/10 shadow-md bg-white/5"
+                  style={{
+                    width: `${Math.max(layoutConfig.logoSize + 16, 72)}px`,
+                    height: `${Math.max(layoutConfig.logoSize + 16, 72)}px`,
+                  }}
+                >
+                  {entry.teamLogo ? (
+                    <img
+                      src={entry.teamLogo}
+                      alt={entry.teamName}
+                      className="w-full h-full object-contain p-1.5"
+                    />
+                  ) : (
+                    <Shield
+                      size={Math.max(layoutConfig.logoSize, 40)}
+                      className="opacity-25 text-black"
+                    />
+                  )}
+                </div>
+
+                <span
+                  className="font-[900] uppercase text-center leading-tight tracking-wide w-full truncate px-1"
+                  style={{
+                    fontSize: `${Math.max(layoutConfig.fontSize + 2, 14)}px`,
+                    color: visualConfig.teamNameColor,
+                  }}
+                  title={entry.teamName}
+                >
+                  {entry.teamName}
+                </span>
+
+                <div className="flex items-center justify-center gap-6 w-full pt-1 border-t border-black/10">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span
+                      className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70"
+                      style={{ color: visualConfig.headerText }}
+                    >
+                      Alive
+                    </span>
+                    <span
+                      className="text-2xl font-[1000] tabular-nums leading-none"
+                      style={{ color: visualConfig.statusAlive }}
+                    >
+                      {entry.alivePlayers}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span
+                      className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70"
+                      style={{ color: visualConfig.headerText }}
+                    >
+                      Posisi WWCD
+                    </span>
+                    <span
+                      className="text-2xl font-[1000] tabular-nums leading-none"
+                      style={{ color: visualConfig.pointsColor }}
+                    >
+                      #{entry.wwcdPosition ?? '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    );
+  }, [
+    showOverlay,
+    showFinalFourOverlay,
+    finalFourTeamsData,
+    layoutConfig,
+    visualConfig,
+    leaderboardFontFamily,
+  ]);
+
+  const elimBannerPreviewNode = useMemo(
+    () => (
+      <div
+        ref={elimBannerPreviewWrapRef}
+        className="absolute z-[500] pointer-events-none"
+        style={elimBannerPositionStyle}
+      >
+        <TeamEliminatedBanner
+          alert={displayElimAlert}
+          visual={elimBannerVisual}
+          tuningPreview={elimBannerHoldPreview}
+        />
+      </div>
+    ),
+    [
+      displayElimAlert,
+      elimBannerVisual,
+      elimBannerHoldPreview,
+      elimBannerPositionStyle,
+      elimBannerPreviewRevision,
+    ]
+  );
 
   const livePreviewContent = useMemo(
     () => (
@@ -1943,26 +2819,60 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           />
         )}
 
-        <div className="absolute z-[500] pointer-events-none" style={elimBannerPositionStyle}>
-          <TeamEliminatedBanner
-            alert={displayElimAlert}
-            visual={elimBannerVisual}
-            tuningPreview={elimBannerHoldPreview}
-          />
-        </div>
+        {elimBannerPreviewNode}
 
-        {leaderboardOverlayPanel}
+        <AnimatePresence initial={false}>
+          {showOverlay && !showFinalFourOverlay && leaderboardOverlayPanel && (
+            <motion.div
+              key="overall-ranking-panel"
+              className="absolute inset-0 pointer-events-none z-[350]"
+              initial={{ x: 64, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{
+                x: 520,
+                opacity: 0,
+                scale: 0.94,
+                transition: { duration: 0.65, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+              }}
+              transition={{ duration: 0.5, ease: FINAL_FOUR_ENTER_EASE }}
+            >
+              {leaderboardOverlayPanel}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence initial={false}>
+          {showOverlay && showFinalFourOverlay && finalFourOverlayPanel && (
+            <motion.div
+              key="final-four-bar"
+              className="absolute inset-0 pointer-events-none z-[400]"
+              initial={{ y: -120, opacity: 0 }}
+              animate={{
+                y: 0,
+                opacity: 1,
+                transition: { duration: 0.6, ease: FINAL_FOUR_ENTER_EASE, delay: 0.08 },
+              }}
+              exit={{
+                y: -80,
+                opacity: 0,
+                transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+              }}
+            >
+              {finalFourOverlayPanel}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     ),
     [
       getAssetAnimationVariants,
       style,
       visualOnly,
-      elimBannerPositionStyle,
-      displayElimAlert,
-      elimBannerVisual,
-      elimBannerHoldPreview,
+      elimBannerPreviewNode,
       leaderboardOverlayPanel,
+      finalFourOverlayPanel,
+      showOverlay,
+      showFinalFourOverlay,
     ]
   );
 
@@ -2132,7 +3042,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 ? 'READY: WINNER FOUND'
                                                 : contentionCount === 2
                                                   ? 'READY: TOP 2 — LANJUT MATCH'
-                                                  : `LIVE: ${contentionCount} TIM TANPA PLACEMENT`}
+                                                  : survivingMatchCount === FINAL_FOUR_ALIVE_COUNT
+                                                    ? 'LIVE: FINAL 4 — BAR ATAS'
+                                                    : `LIVE: ${contentionCount} TIM TANPA PLACEMENT`}
                                         </span>
                                     </div>
                                     <button 
@@ -2789,15 +3701,60 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   1920×1080 · POS X positif = kanan · bukan LAYOUT TRANSFORM leaderboard di atas.
                                   {elimBannerHoldPreview && (
                                     <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
-                                      Preview aktif — SCALE / POS X / POS Y langsung terlihat di monitor
+                                      Preview aktif — arahkan mouse ke kolom angka lalu scroll (Shift = ±10), atau klik lalu ketik angka
                                     </span>
                                   )}
                                 </p>
                                 <div className="grid grid-cols-3 gap-3">
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ScrollableInput value={elimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ScrollableInput value={elimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ScrollableInput value={elimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                 </div>
+                                {elimBannerHoldPreview && (
+                                  <div className="mt-4 rounded-xl border border-[#ccff00]/30 overflow-hidden bg-zinc-950">
+                                    <div className="px-3 py-2 border-b border-[#ccff00]/20 flex items-center justify-between gap-2">
+                                      <span className="text-[7px] font-black text-[#ccff00] uppercase tracking-widest">
+                                        Preview langsung
+                                      </span>
+                                      <span className="text-[6px] text-zinc-500 normal-case">
+                                        Canvas 1920×1080 · monitor kanan ikut update
+                                      </span>
+                                    </div>
+                                    <div
+                                      className="relative w-full h-[210px] overflow-hidden"
+                                      style={{
+                                        backgroundColor: '#050505',
+                                        backgroundImage:
+                                          'conic-gradient(#0a0a0a 90deg, #050505 90deg 180deg, #0a0a0a 180deg 270deg, #050505 270deg)',
+                                        backgroundSize: '18px 18px',
+                                      }}
+                                    >
+                                      <div className="absolute left-1/2 top-0 -translate-x-1/2">
+                                        <div
+                                          style={{
+                                            width: 1920,
+                                            height: 1080,
+                                            transform: `scale(${210 / 1080})`,
+                                            transformOrigin: 'top center',
+                                          }}
+                                          className="relative"
+                                        >
+                                          <div
+                                            ref={elimBannerInlinePreviewWrapRef}
+                                            className="absolute z-[10] pointer-events-none"
+                                            style={elimBannerPositionStyle}
+                                          >
+                                            <TeamEliminatedBanner
+                                              alert={displayElimAlert}
+                                              visual={elimBannerVisual}
+                                              tuningPreview
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                                 <div className="mt-4 pt-4 border-t border-white/5">
                                   <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
                                     <Type size={12} className="text-[#ccff00]" />
@@ -2811,10 +3768,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   <select
                                     value={elimBannerFontFamilyId}
                                     onChange={(e) =>
-                                      setVisualConfig((prev) => ({
-                                        ...prev,
-                                        elimBannerFontFamily: e.target.value,
-                                      }))
+                                      patchElimBannerVisualField(
+                                        'elimBannerFontFamily',
+                                        e.target.value
+                                      )
                                     }
                                     className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-[11px] text-white font-bold outline-none focus:border-[#ccff00] cursor-pointer"
                                     style={{
@@ -2861,11 +3818,14 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
                                           {ELIMINATION_BANNER_FONT_LABELS[fontKey]}
                                         </label>
-                                        <ScrollableInput
+                                        <ElimNumberInput
+                                          previewMode={elimBannerHoldPreview}
                                           value={elimBannerTypography[fontKey]}
                                           onChange={(val) =>
                                             patchElimBannerTypography(fontKey, val)
                                           }
+                                          onWheelTuningChange={handleElimBannerWheelTuning}
+                                          onFocusTuningChange={handleElimBannerFocusTuning}
                                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                         />
                                       </div>
@@ -3121,17 +4081,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                               <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
                                                 Zoom gambar % (utuh)
                                               </label>
-                                              <ScrollableInput
-                                                value={visualConfig.elimBannerFullImageZoom ?? 100}
+                                              <ElimNumberInput
+                                                previewMode={elimBannerHoldPreview}
+                                                value={elimBannerVisual.elimBannerFullImageZoom ?? 100}
                                                 onChange={(val) =>
-                                                  setVisualConfig((prev) => ({
-                                                    ...prev,
-                                                    elimBannerFullImageZoom: Math.min(
-                                                      300,
-                                                      Math.max(25, val)
-                                                    ),
-                                                  }))
+                                                  patchElimBannerVisualField(
+                                                    'elimBannerFullImageZoom',
+                                                    Math.min(300, Math.max(25, val))
+                                                  )
                                                 }
+                                                onWheelTuningChange={handleElimBannerWheelTuning}
+                                                onFocusTuningChange={handleElimBannerFocusTuning}
                                                 className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                               />
                                               <p className="text-[6px] text-zinc-600 normal-case mt-1">
@@ -3146,14 +4106,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
                                                   Posisi gambar X %
                                                 </label>
-                                                <ScrollableInput
-                                                  value={visualConfig.elimBannerFullImagePosX ?? 50}
+                                                <ElimNumberInput
+                                                  previewMode={elimBannerHoldPreview}
+                                                  value={elimBannerVisual.elimBannerFullImagePosX ?? 50}
                                                   onChange={(val) =>
-                                                    setVisualConfig((prev) => ({
-                                                      ...prev,
-                                                      elimBannerFullImagePosX: val,
-                                                    }))
+                                                    patchElimBannerVisualField(
+                                                      'elimBannerFullImagePosX',
+                                                      val
+                                                    )
                                                   }
+                                                  onWheelTuningChange={handleElimBannerWheelTuning}
+                                                  onFocusTuningChange={handleElimBannerFocusTuning}
                                                   className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                 />
                                               </div>
@@ -3161,14 +4124,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
                                                   Posisi gambar Y %
                                                 </label>
-                                                <ScrollableInput
-                                                  value={visualConfig.elimBannerFullImagePosY ?? 50}
+                                                <ElimNumberInput
+                                                  previewMode={elimBannerHoldPreview}
+                                                  value={elimBannerVisual.elimBannerFullImagePosY ?? 50}
                                                   onChange={(val) =>
-                                                    setVisualConfig((prev) => ({
-                                                      ...prev,
-                                                      elimBannerFullImagePosY: val,
-                                                    }))
+                                                    patchElimBannerVisualField(
+                                                      'elimBannerFullImagePosY',
+                                                      val
+                                                    )
                                                   }
+                                                  onWheelTuningChange={handleElimBannerWheelTuning}
+                                                  onFocusTuningChange={handleElimBannerFocusTuning}
                                                   className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                 />
                                               </div>
@@ -3191,6 +4157,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                         </h6>
                                         <p className="text-[7px] text-zinc-500 normal-case mb-4 leading-relaxed">
                                           {ELIMINATION_BANNER_FULL_LAYOUT_NOTE}
+                                          {elimBannerHoldPreview && (
+                                            <span className="block mt-1 text-[#ccff00]">
+                                              Scroll di atas kolom angka (Shift = ±10) atau klik lalu ketik.
+                                            </span>
+                                          )}
                                         </p>
 
                                       {(
@@ -3254,7 +4225,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                   <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
                                                     {label}
                                                   </label>
-                                                  <ScrollableInput
+                                                  <ElimNumberInput
+                                                    previewMode={elimBannerHoldPreview}
                                                     value={
                                                       prop === 'fontSize' && key === 'placement'
                                                         ? elimBannerTypography.placement
@@ -3275,6 +4247,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                             EliminationBannerFullOverlayLayout[typeof key]
                                                           >)
                                                     }
+                                                    onWheelTuningChange={handleElimBannerWheelTuning}
+                                                    onFocusTuningChange={handleElimBannerFocusTuning}
                                                     className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                   />
                                                 </div>
