@@ -20,7 +20,7 @@ import {
   Upload,
   RotateCcw
 } from 'lucide-react';
-import { Theme, Asset, Game } from '../../../types';
+import { Theme, Asset, Game, PlayerData } from '../../../types';
 import AssetView from '../../AssetView';
 import OverlayTopFraggersView from './OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from './OverlayPubgMobileTheme01/OverlayLeaderboardView';
@@ -40,6 +40,7 @@ interface PubgMobileViewProps {
   memberPackage: string;
   globalLogo?: string | null;
   adminTierOverride?: 'BASIC' | 'PREMIUM' | 'ULTIMATE';
+  projectPlayers?: PlayerData[];
 }
 
 // --- THEME CARD COMPONENT ---
@@ -216,7 +217,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
 };
 
 const PubgMobileView: React.FC<PubgMobileViewProps> = ({
-  onBack, themes, setThemes, onSelectTheme, selectedTheme, selectedAsset, onSelectAsset, onPreviewAsset, userRole, memberPackage, globalLogo, adminTierOverride
+  onBack, themes, setThemes, onSelectTheme, selectedTheme, selectedAsset, onSelectAsset, onPreviewAsset, userRole, memberPackage, globalLogo, adminTierOverride, projectPlayers: projectPlayersProp = [],
 }) => {
   const [activeTab, setActiveTab] = useState<'TEMPLATES' | 'WIDGETS' | 'CONFIG'>('TEMPLATES');
   const [games, setGames] = useState<Game[]>([]);
@@ -246,6 +247,7 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
   };
 
   if (selectedTheme && selectedAsset) {
+      const projectPlayers = projectPlayersProp ?? [];
       // Logic for Top Fraggers
       if (selectedAsset.id === 'pmgc-fraggers') {
           return (
@@ -259,7 +261,8 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
                 onBack={() => { onSelectAsset(null); onSelectTheme(null as any); }} 
                 onSelectTheme={onSelectTheme} 
                 onSelectAsset={onSelectAsset} 
-                globalLogo={globalLogo} 
+                globalLogo={globalLogo}
+                projectPlayers={projectPlayers}
             />
           );
       }
@@ -277,7 +280,8 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
                 onBack={() => { onSelectAsset(null); onSelectTheme(null as any); }} 
                 onSelectTheme={onSelectTheme} 
                 onSelectAsset={onSelectAsset} 
-                globalLogo={globalLogo} 
+                globalLogo={globalLogo}
+                projectPlayers={projectPlayers}
             />
           );
       }

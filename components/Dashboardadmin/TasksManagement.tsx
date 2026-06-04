@@ -3,7 +3,7 @@ import {
   Plus, Edit3, Trash2, CheckCircle2, Clock, 
   AlertTriangle, ArrowUpCircle, ThumbsUp, Check, X,
   Info, Sparkles, RefreshCw, Layers, Terminal, 
-  Flame, ChevronRight, Tag, BookOpen, AlertCircle
+  Flame, ChevronRight, Tag, BookOpen, AlertCircle, Copy, CheckCheck
 } from 'lucide-react';
 import { AppUpdateTask, TaskCategory, TaskStatus, TaskPriority } from '../../types';
 
@@ -48,6 +48,27 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
   // Delete safety
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [copiedFieldId, setCopiedFieldId] = useState<string | null>(null);
+
+  const copyTextToClipboard = async (text: string, fieldId: string) => {
+    const value = text?.trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    setCopiedFieldId(fieldId);
+    window.setTimeout(() => setCopiedFieldId((current) => (current === fieldId ? null : current)), 2000);
+  };
 
   // Stats calculation
   const stats = useMemo(() => {
@@ -305,7 +326,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
   };
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 select-text">
       
       {/* Title Header */}
       <header className="flex flex-col lg:flex-row justify-between items-start mb-12 gap-6">
@@ -543,10 +564,38 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                 <span>CREATED {new Date(task.createdAt).toLocaleDateString()}</span>
               </div>
 
-              {/* Description */}
-              <p className="text-zinc-400 text-xs font-semibold leading-relaxed mb-5">
-                {task.description}
-              </p>
+              {/* Description — selectable + copy */}
+              <div className="mb-5">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[8px] font-black text-zinc-500 tracking-widest uppercase">
+                    Detailed Description / Instructions
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyTextToClipboard(task.description, `task-desc-${task.id}`);
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-white/10 bg-zinc-900/80 text-[8px] font-black uppercase tracking-wider text-zinc-400 hover:text-[#ccff00] hover:border-[#ccff00]/30 transition-colors shrink-0"
+                    title="Salin teks instruksi"
+                  >
+                    {copiedFieldId === `task-desc-${task.id}` ? (
+                      <>
+                        <CheckCheck size={10} className="text-[#ccff00]" />
+                        <span className="text-[#ccff00]">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={10} />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-zinc-400 text-xs font-semibold leading-relaxed whitespace-pre-wrap break-words cursor-text">
+                  {task.description}
+                </p>
+              </div>
 
               {/* Developer Logs & Notes */}
               {task.devNotes && (
@@ -763,12 +812,35 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
               {/* Description field */}
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-500 tracking-widest uppercase block">Detailed Description / Instructions</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[10px] font-black text-gray-500 tracking-widest uppercase block">
+                    Detailed Description / Instructions
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => copyTextToClipboard(description, 'editor-desc')}
+                    disabled={!description.trim()}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-white/10 bg-zinc-900 text-[8px] font-black uppercase tracking-wider text-zinc-400 hover:text-[#ccff00] hover:border-[#ccff00]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                    title="Salin teks instruksi"
+                  >
+                    {copiedFieldId === 'editor-desc' ? (
+                      <>
+                        <CheckCheck size={10} className="text-[#ccff00]" />
+                        <span className="text-[#ccff00]">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={10} />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea 
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Describe the scope of the update, required files to tweak, or desired UI changes..."
-                  className="w-full bg-black border border-white/10 rounded-xl py-3.5 px-4 text-xs font-semibold text-white focus:border-[#ccff00] focus:ring-1 focus:ring-[#ccff00] outline-none transition-all h-24 resize-none"
+                  className="w-full bg-black border border-white/10 rounded-xl py-3.5 px-4 text-xs font-semibold text-white focus:border-[#ccff00] focus:ring-1 focus:ring-[#ccff00] outline-none transition-all h-24 resize-y select-text cursor-text"
                   required
                 />
               </div>

@@ -1,6 +1,8 @@
 
-import React, { useState } from 'react';
-import { X, GripVertical, ArrowUp, ArrowDown, Check, RotateCcw, ShieldCheck, Settings2, Info } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, ArrowUp, ArrowDown, RotateCcw, ShieldCheck, Settings2, Info, Target } from 'lucide-react';
+import type { MatchKillRules } from '@/lib/leaderboardKillLogic';
+import { DEFAULT_MATCH_KILL_RULES } from '@/lib/leaderboardKillLogic';
 
 export type TieBreakerCriteria = 
   | 'TOTAL_POINTS' 
@@ -10,11 +12,18 @@ export type TieBreakerCriteria =
   | 'MATCH_KILLS' 
   | 'SLOT_RANK';
 
+export interface TieBreakerConfig {
+  order: TieBreakerCriteria[];
+  matchKillRules: MatchKillRules;
+}
+
 interface TieBreakerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApply: (order: TieBreakerCriteria[]) => void;
+  onApply: (config: TieBreakerConfig) => void;
   currentOrder: TieBreakerCriteria[];
+  currentMatchKillRules: MatchKillRules;
+  currentMatch?: number;
 }
 
 const CRITERIA_LABELS: Record<TieBreakerCriteria, { label: string; desc: string }> = {
@@ -35,9 +44,25 @@ const DEFAULT_ORDER: TieBreakerCriteria[] = [
   'SLOT_RANK'
 ];
 
-const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onApply, currentOrder }) => {
+const TieBreakerModal: React.FC<TieBreakerModalProps> = ({
+  isOpen,
+  onClose,
+  onApply,
+  currentOrder,
+  currentMatchKillRules,
+  currentMatch = 1,
+}) => {
   const [order, setOrder] = useState<TieBreakerCriteria[]>(currentOrder);
+  const [matchKillRules, setMatchKillRules] = useState<MatchKillRules>(currentMatchKillRules);
   const [isCustom, setIsCustom] = useState(JSON.stringify(currentOrder) !== JSON.stringify(DEFAULT_ORDER));
+
+  useEffect(() => {
+    if (isOpen) {
+      setOrder(currentOrder);
+      setMatchKillRules(currentMatchKillRules);
+      setIsCustom(JSON.stringify(currentOrder) !== JSON.stringify(DEFAULT_ORDER));
+    }
+  }, [isOpen, currentOrder, currentMatchKillRules]);
 
   if (!isOpen) return null;
 
@@ -64,10 +89,9 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/90 backdrop-blur-md animate-in fade-in" onClick={onClose} />
       
-      <div className="relative w-full max-w-lg bg-[#0c0c0c] border border-white/10 rounded-[40px] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95">
+      <div className="relative w-full max-w-lg bg-[#0c0c0c] border border-white/10 rounded-[40px] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 max-h-[90vh]">
         
-        {/* Header */}
-        <div className="p-8 border-b border-white/5 bg-[#111] flex items-center justify-between">
+        <div className="p-8 border-b border-white/5 bg-[#111] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-[#ccff00]/10 border border-[#ccff00]/20 flex items-center justify-center text-[#ccff00]">
               <Settings2 size={24} />
@@ -76,14 +100,50 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
               <h2 className="text-2xl font-[1000] italic text-white uppercase tracking-tighter leading-none mb-1">
                 TIE-BREAKER <span className="text-[#ccff00]">LOGIC</span>
               </h2>
-              <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">HIERARCHY CONFIGURATION</p>
+              <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">MATCH {currentMatch} CONFIGURATION</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 text-zinc-500 hover:text-white transition-colors"><X size={20} /></button>
         </div>
 
-        {/* Mode Selector */}
-        <div className="p-6 bg-black/40 border-b border-white/5">
+        {/* Match kill rules */}
+        <div className="p-6 bg-[#0a0a0a] border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-2 mb-3">
+            <Target size={14} className="text-[#ccff00]" />
+            <h3 className="text-[10px] font-black text-white uppercase tracking-widest">Match Rules — Revive & Kill</h3>
+          </div>
+          <div className="flex bg-zinc-900 p-1 rounded-2xl border border-white/5">
+            <button
+              type="button"
+              onClick={() => setMatchKillRules({ finisherKeepsKillOnRevive: false })}
+              className={`flex-1 py-3 px-2 rounded-xl text-[9px] font-black tracking-widest uppercase transition-all ${
+                !matchKillRules.finisherKeepsKillOnRevive
+                  ? 'bg-orange-600 text-white shadow-lg'
+                  : 'text-zinc-500 hover:text-white'
+              }`}
+            >
+              ON — Kill berkurang
+            </button>
+            <button
+              type="button"
+              onClick={() => setMatchKillRules({ finisherKeepsKillOnRevive: true })}
+              className={`flex-1 py-3 px-2 rounded-xl text-[9px] font-black tracking-widest uppercase transition-all ${
+                matchKillRules.finisherKeepsKillOnRevive
+                  ? 'bg-[#ccff00] text-black shadow-lg'
+                  : 'text-zinc-500 hover:text-white'
+              }`}
+            >
+              OFF — Kill tetap
+            </button>
+          </div>
+          <p className="text-[8px] font-medium text-zinc-600 uppercase tracking-wide mt-3 leading-relaxed">
+            {!matchKillRules.finisherKeepsKillOnRevive
+              ? 'ON: Revive dari Dead (K) — kill finisher −1. Mode uji / salah klik.'
+              : 'OFF: Revive dari Dead (K) — finisher tetap dapat kill. Mode PUBG / Recall.'}
+          </p>
+        </div>
+
+        <div className="p-6 bg-black/40 border-b border-white/5 shrink-0">
           <div className="flex bg-zinc-900 p-1 rounded-2xl border border-white/5">
             <button 
               onClick={() => handleToggleMode('DEFAULT')}
@@ -100,8 +160,7 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
           </div>
         </div>
 
-        {/* Sortable List */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-2 custom-scrollbar max-h-[400px]">
+        <div className="flex-1 overflow-y-auto p-6 space-y-2 custom-scrollbar min-h-0">
           {order.map((criteria, idx) => (
             <div 
               key={criteria}
@@ -144,8 +203,7 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
           ))}
         </div>
 
-        {/* Footer */}
-        <div className="p-8 bg-[#111] border-t border-white/5 flex flex-col gap-4">
+        <div className="p-8 bg-[#111] border-t border-white/5 flex flex-col gap-4 shrink-0">
           <div className="flex items-start gap-3 p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
             <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />
             <p className="text-[9px] font-medium text-blue-400/70 uppercase leading-relaxed tracking-wide">
@@ -157,7 +215,7 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
           <div className="flex gap-4">
             <button onClick={onClose} className="flex-1 py-4 rounded-2xl bg-zinc-900 border border-white/5 text-[10px] font-black text-zinc-500 uppercase tracking-widest hover:text-white">CANCEL</button>
             <button 
-              onClick={() => onApply(order)}
+              onClick={() => onApply({ order, matchKillRules })}
               className="flex-1 py-4 rounded-2xl bg-[#ccff00] text-black font-black text-[10px] uppercase tracking-widest shadow-[0_0_30px_rgba(204,255,0,0.3)] hover:scale-[1.02] transition-all"
             >
               APPLY LOGIC
@@ -170,3 +228,4 @@ const TieBreakerModal: React.FC<TieBreakerModalProps> = ({ isOpen, onClose, onAp
 };
 
 export default TieBreakerModal;
+export { DEFAULT_ORDER, DEFAULT_MATCH_KILL_RULES };

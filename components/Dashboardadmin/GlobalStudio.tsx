@@ -437,24 +437,16 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     };
   }, [companionEnabled]);
 
-  const renderProgramLayers = () => {
-    return (
-      <div className="absolute inset-0">
-        <AnimatePresence>
-          {Object.entries(programLayers).sort(([a], [b]) => Number(a) - Number(b)).map(([layer, assetId]) => {
-            if (!assetId) return null;
-            return renderProgramAsset(
-              assetId as string, 
-              { zIndex: Number(layer), position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }, 
-              `layer-${layer}-${assetId}`
-            );
-          })}
-        </AnimatePresence>
-      </div>
-    );
-  };
+  const isLive = useMemo(
+    () => Object.values(programLayers).some((assetId) => assetId !== null),
+    [programLayers]
+  );
 
-  const renderProgramAsset = (id: string | null, style?: React.CSSProperties, overrideKey?: string) => {
+  const handleBack = useCallback(() => {
+    if (onBack && !isLive) onBack();
+  }, [onBack, isLive]);
+
+  const renderProgramAsset = useCallback((id: string | null, style?: React.CSSProperties, overrideKey?: string) => {
     if (!id) return null;
     const assetToPlay = ASSET_DATABASE.find(a => a.id === id);
     if (!assetToPlay) return null;
@@ -504,13 +496,52 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       }
     }
     return null;
-  };
+  }, [themes, selectedThemeId, games, userRole, globalLogo, project?.players, handleBack]);
 
-  const isLive = useMemo(() => Object.values(programLayers).some(assetId => assetId !== null), [programLayers]);
+  const programLayerList = useMemo(
+    () =>
+      Object.entries(programLayers)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .filter((entry): entry is [string, string] => entry[1] != null),
+    [programLayers]
+  );
 
-  const handleBack = useCallback(() => {
-    if (onBack && !isLive) onBack();
-  }, [onBack, isLive]);
+  const programPreviewNode = useMemo(
+    () => (
+      <div className="absolute inset-0 pointer-events-none">
+        {programLayerList.map(([layer, assetId]) => (
+          <div
+            key={`layer-${layer}-${assetId}`}
+            className="absolute inset-0"
+            style={{ zIndex: Number(layer) }}
+          >
+            {renderProgramAsset(
+              assetId,
+              { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
+              `layer-${layer}-${assetId}`
+            )}
+          </div>
+        ))}
+      </div>
+    ),
+    [programLayerList, renderProgramAsset]
+  );
+
+  const stagingPreviewNode = useMemo(() => {
+    if (!previewAssetId) return null;
+    return renderProgramAsset(previewAssetId, undefined, `preview-${previewAssetId}`);
+  }, [previewAssetId, renderProgramAsset]);
+
+  const customPreviewNode = useMemo(
+    () => (
+      <div className="w-full h-full relative overflow-hidden">
+        <AnimatePresence mode="wait" initial={false}>
+          {stagingPreviewNode}
+        </AnimatePresence>
+      </div>
+    ),
+    [stagingPreviewNode]
+  );
 
   const renderAssetView = () => {
     if (!activeAsset || !activeTheme) {
@@ -875,14 +906,8 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               userRole={userRole}
               onPlayAction={() => handlePlayAsset(selectedAssetId)}
               playStatus={getAssetStatus(selectedAssetId)}
-              customPreview={
-                <div className="w-full h-full relative overflow-hidden">
-                  <AnimatePresence>
-                    {previewAssetId && renderProgramAsset(previewAssetId)}
-                  </AnimatePresence>
-                </div>
-              }
-              programPreview={renderProgramLayers()}
+              customPreview={customPreviewNode}
+              programPreview={programPreviewNode}
               activeAssets={
                 [
                   ...(previewAssetId ? [{

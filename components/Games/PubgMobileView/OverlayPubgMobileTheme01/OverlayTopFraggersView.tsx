@@ -13,6 +13,23 @@ import PanelControlMonitor, { PreviewControlContext } from '../../../PanelContro
 import { AnimationConfig, getAnimationVariants } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 import { notifyCompanionData } from '@/lib/overlayData';
+import { useOverlayFonts } from '../useEliminationBannerFonts';
+import OverlayFontFamilySelect from '../../../OverlayFontFamilySelect';
+import {
+  DEFAULT_OVERLAY_FONT_FAMILY_ID,
+  getOverlayFontCssFamily,
+  resolveOverlayFontFamilyId,
+} from '@/lib/eliminationBannerFonts';
+import {
+  buildTopFraggersFromMatch,
+  buildPersonnelDbRows,
+  filterPersonnelDbRows,
+  listPersonnelDbTeams,
+  isMatchReadyForTopFraggerSync,
+  mergeFraggersElimsFromMatch,
+  countAliveTeams,
+  type PersonnelDbPlayer,
+} from '@/lib/topFraggersSync';
 
 interface OverlayTopFraggersViewProps {
   asset: Asset;
@@ -74,7 +91,6 @@ const ScrollableInput = ({
   return <input ref={inputRef} type="number" value={value} onChange={(e) => onChange(Number(e.target.value))} className={className} />;
 };
 
-const AVAILABLE_FONTS = ['Inter', 'Roboto', 'Montserrat', 'Oswald', 'Bebas Neue', 'Chakra Petch', 'Orbitron', 'Poppins'];
 const DEFAULT_PLAYER_IMG = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop';
 const DEFAULT_TEAM_LOGO = 'https://api.dicebear.com/7.x/identicon/svg?seed=DEFAULT';
 
@@ -82,6 +98,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
   asset, theme, games, themes, availableAssets, userRole, onBack, onSelectTheme, onSelectAsset, globalLogo, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
   programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
 }) => {
+  useOverlayFonts();
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
   const [showMonitors, setShowMonitors] = useState(true);
   const [showList, setShowList] = useState(true);
@@ -183,32 +200,56 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
     }
   }, [projectPlayers]);
 
-  const [teams, setTeams] = useSharedState<any[]>('BROHUBS_LEADERBOARD_TEAMS', []);
-  const [currentMatch, setCurrentMatch] = useSharedState('BROHUBS_LEADERBOARD_MATCH', 1);
+  const [teams] = useSharedState<any[]>('BROHUBS_LEADERBOARD_TEAMS', []);
+  const [currentMatch] = useSharedState('BROHUBS_LEADERBOARD_MATCH', 1);
   const [matchEnded, setMatchEnded] = useState(false);
 
-  useEffect(() => {
-    // Sync fraggers with leaderboard kills in real-time
-    const newFraggers = [...fraggers];
-    let hasChanges = false;
-    teams.forEach(team => {
-        team.playerNames.forEach((playerName: string, pIdx: number) => {
-            const fraggerIdx = newFraggers.findIndex(f => f.name.toLowerCase() === playerName.toLowerCase());
-            if (fraggerIdx >= 0) {
-                if (newFraggers[fraggerIdx].elims !== team.playerKills[pIdx]) {
-                    newFraggers[fraggerIdx].elims = team.playerKills[pIdx];
-                    hasChanges = true;
-                }
-            }
-        });
-    });
+  const aliveTeamCount = useMemo(() => countAliveTeams(teams), [teams]);
+  const matchReadyForFraggerSync = useMemo(
+    () => isMatchReadyForTopFraggerSync(teams),
+    [teams]
+  );
 
-    if (hasChanges) {
-        newFraggers.sort((a,b) => b.elims - a.elims);
-        newFraggers.forEach((f, i) => f.rank = i + 1);
-        setFraggers(newFraggers);
+  const syncTopFraggersFromMatch = useCallback(
+    (force = false) => {
+      if (!teams.length) {
+        window.alert(
+          'Data match belum ada. Buka Overall Ranking dan input kill terlebih dahulu.'
+        );
+        return;
+      }
+      const built = buildTopFraggersFromMatch(teams, projectPlayers, 5, {
+        teamLogo: DEFAULT_TEAM_LOGO,
+        playerImage: DEFAULT_PLAYER_IMG,
+        survival: '0 M 00 S',
+      });
+      setFraggers(built);
+      if (isMatchReadyForTopFraggerSync(teams) || force) {
+        setMatchEnded(isMatchReadyForTopFraggerSync(teams));
+      }
+    },
+    [teams, projectPlayers, setFraggers]
+  );
+
+  useEffect(() => {
+    if (visualOnly) return;
+    if (!teams.length) return;
+
+    if (matchReadyForFraggerSync) {
+      setFraggers(
+        buildTopFraggersFromMatch(teams, projectPlayers, 5, {
+          teamLogo: DEFAULT_TEAM_LOGO,
+          playerImage: DEFAULT_PLAYER_IMG,
+          survival: '0 M 00 S',
+        })
+      );
+      setMatchEnded(true);
+      return;
     }
-  }, [teams, fraggers]);
+
+    setMatchEnded(false);
+    setFraggers((prev) => mergeFraggersElimsFromMatch(prev, teams, projectPlayers) ?? prev);
+  }, [teams, projectPlayers, matchReadyForFraggerSync, currentMatch, setFraggers, visualOnly]);
 
   // DB Selector State
   const [isDbSelectorOpen, setIsDbSelectorOpen] = useState<{ rankIndex: number } | null>(null);
@@ -230,11 +271,37 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
   });
 
   const [typography, setTypography] = useSharedState('BROHUBS_TOPFRAGGERS_TYPOGRAPHY', {
+    fontFamilyId: 'inter' as string,
     title: { font: 'Inter', weight: '950', italic: true, size: 84, x: 0, y: 0 },
     subtitle: { font: 'Inter', weight: '900', italic: false, size: 12, x: 0, y: 0 },
     card: { font: 'Inter', weight: '900', italic: false, size: 20 },
     rank: { font: 'Inter', weight: '950', italic: false, size: 32 },
   });
+
+  useEffect(() => {
+    setTypography((prev: typeof typography) => {
+      const raw = prev as typeof typography & { fontFamilyId?: string };
+      if (raw.fontFamilyId) {
+        const resolved = resolveOverlayFontFamilyId(raw.fontFamilyId);
+        if (resolved === raw.fontFamilyId) return prev;
+        return { ...raw, fontFamilyId: resolved };
+      }
+      const fromLegacy = resolveOverlayFontFamilyId(
+        raw.title?.font ?? raw.subtitle?.font ?? DEFAULT_OVERLAY_FONT_FAMILY_ID
+      );
+      return { ...raw, fontFamilyId: fromLegacy };
+    });
+  }, [setTypography]);
+
+  const fraggerFontFamily = useMemo(
+    () =>
+      getOverlayFontCssFamily(
+        resolveOverlayFontFamilyId(
+          (typography as { fontFamilyId?: string }).fontFamilyId ?? typography.title?.font
+        )
+      ),
+    [typography]
+  );
 
   const [cardLayout, setCardLayout] = useSharedState('BROHUBS_TOPFRAGGERS_LAYOUT', {
     playerNameSize: 22,
@@ -293,79 +360,50 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
       setFraggers(updated);
   };
 
-  const resetFraggers = () => {
-    setFraggers([
-      { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: DEFAULT_TEAM_LOGO, elims: 0, damage: 0, survival: '0 M 00 S', image: DEFAULT_PLAYER_IMG },
-      { rank: 2, name: 'PLAYER 2', team: 'TEAM B', teamLogo: DEFAULT_TEAM_LOGO, elims: 0, damage: 0, survival: '0 M 00 S', image: DEFAULT_PLAYER_IMG },
-      { rank: 3, name: 'PLAYER 3', team: 'TEAM C', teamLogo: DEFAULT_TEAM_LOGO, elims: 0, damage: 0, survival: '0 M 00 S', image: DEFAULT_PLAYER_IMG },
-      { rank: 4, name: 'PLAYER 4', team: 'TEAM D', teamLogo: DEFAULT_TEAM_LOGO, elims: 0, damage: 0, survival: '0 M 00 S', image: DEFAULT_PLAYER_IMG },
-      { rank: 5, name: 'PLAYER 5', team: 'TEAM E', teamLogo: DEFAULT_TEAM_LOGO, elims: 0, damage: 0, survival: '0 M 00 S', image: DEFAULT_PLAYER_IMG },
-    ]);
-    
-    // Reset Leaderboard
-    setTeams(prevTeams => prevTeams.map(t => ({ 
-      ...t, 
-      points: 0, 
-      totalPlacementPoints: 0, 
-      totalWwcds: 0,
-      playerKills: [0, 0, 0, 0],
-      status: [1, 1, 1, 1],
-      placementRank: null
-    })));
-    setCurrentMatch(1);
-    setMatchEnded(false);
-  };
-
   const openDbModal = (rankIndex: number) => {
-    const currentTeam = fraggers[rankIndex].team;
-    // Extract unique teams
-    const uniqueTeams = Array.from(new Set(projectPlayers.map(p => p.team))).sort();
-    
-    // Check if currentTeam exists in uniqueTeams (case insensitive matching)
-    const matchingTeam = uniqueTeams.find(t => t.toLowerCase() === currentTeam.toLowerCase());
-    
-    setSelectedTeamFilter(matchingTeam || 'ALL');
+    setSelectedTeamFilter('ALL');
     setDbSearch('');
     setIsDbSelectorOpen({ rankIndex });
   };
 
-  const handleLoadFromDb = (rankIndex: number, player: PlayerData) => {
+  const handleLoadFromDb = (rankIndex: number, player: PersonnelDbPlayer) => {
+    const liveKills = player.elims ?? player.kills ?? 0;
+
     const updated = [...fraggers];
     updated[rankIndex] = {
         ...updated[rankIndex],
         name: player.name,
         team: player.team,
         teamLogo: player.teamLogo || DEFAULT_TEAM_LOGO,
-        image: player.image || DEFAULT_PLAYER_IMG
+        image: player.image || DEFAULT_PLAYER_IMG,
+        elims: liveKills,
     };
+    updated.sort((a, b) => b.elims - a.elims);
+    updated.forEach((f, i) => {
+      f.rank = i + 1;
+    });
     setFraggers(updated);
     setIsDbSelectorOpen(null);
   };
 
-  // Filter based on Player Name, Team, or ID, AND Selected Team Filter
-  const filteredDbPlayers = useMemo(() => {
-    return projectPlayers.map(p => {
-      // Try to find live kill count for this player
-      let liveKills = p.elims || 0;
-      teams.forEach(team => {
-          const pIdx = team.playerNames.findIndex((name: string) => name.toLowerCase() === p.name.toLowerCase());
-          if (pIdx >= 0) {
-              liveKills = team.playerKills[pIdx];
-          }
-      });
-      return { ...p, elims: liveKills };
-    }).filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(dbSearch.toLowerCase()) || 
-                            p.team.toLowerCase().includes(dbSearch.toLowerCase()) ||
-                            p.id.toLowerCase().includes(dbSearch.toLowerCase());
-      const matchesTeam = selectedTeamFilter === 'ALL' || p.team === selectedTeamFilter;
-      return matchesSearch && matchesTeam;
-    }).sort((a, b) => (b.elims || 0) - (a.elims || 0));
-  }, [projectPlayers, dbSearch, selectedTeamFilter, teams]);
+  const personnelDbRows = useMemo(
+    () => buildPersonnelDbRows(projectPlayers, teams),
+    [projectPlayers, teams]
+  );
 
-  const uniqueTeams = useMemo(() => {
-    return Array.from(new Set(projectPlayers.map(p => p.team))).sort();
-  }, [projectPlayers]);
+  const filteredDbPlayers = useMemo(
+    () =>
+      filterPersonnelDbRows(personnelDbRows, {
+        teamFilter: selectedTeamFilter,
+        search: dbSearch,
+      }),
+    [personnelDbRows, selectedTeamFilter, dbSearch]
+  );
+
+  const uniqueTeams = useMemo(
+    () => listPersonnelDbTeams(personnelDbRows),
+    [personnelDbRows]
+  );
 
   const [animationConfig, setAnimationConfig] = useSharedState<AnimationConfig>('BROHUBS_TOPFRAGGERS_ANIMATION', {
     inType: 'fade',
@@ -402,23 +440,11 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
           BROHUBS_TOPFRAGGERS_TYPOGRAPHY: typography,
           BROHUBS_TOPFRAGGERS_LAYOUT: cardLayout,
           BROHUBS_TOPFRAGGERS_MATCH: matchInfo,
-          BROHUBS_LEADERBOARD_TEAMS: teams,
-          BROHUBS_LEADERBOARD_MATCH: currentMatch,
         },
       });
     }, 400);
     return () => clearTimeout(timer);
-  }, [
-    asset.id,
-    fraggers,
-    visualConfig,
-    typography,
-    cardLayout,
-    matchInfo,
-    teams,
-    currentMatch,
-    visualOnly,
-  ]);
+  }, [asset.id, fraggers, visualConfig, typography, cardLayout, matchInfo, visualOnly]);
 
   const getAssetAnimationVariants = useCallback(() => {
     const variants = getAnimationVariants(animationConfig);
@@ -453,7 +479,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
   const livePreviewContent = useMemo(() => (
     <motion.div 
-      initial={{ opacity: 0 }}
+      initial={visualOnly ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ 
         opacity: 0,
@@ -485,7 +511,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                <motion.h1 
                  exit={{ scale: 0.8, opacity: 0, y: -50, transition: { duration: 0.5, ease: "easeIn" } }}
                  className="tracking-tighter uppercase leading-none mb-4 drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]" 
-                 style={{ color: visualConfig.titleColor, fontFamily: typography.title.font, fontWeight: typography.title.weight, fontStyle: typography.title.italic ? 'italic' : 'normal', fontSize: `${typography.title.size}px`, transform: `translate(${typography.title.x}px, ${typography.title.y}px)` }}
+                 style={{ color: visualConfig.titleColor, fontFamily: fraggerFontFamily, fontWeight: typography.title.weight, fontStyle: typography.title.italic ? 'italic' : 'normal', fontSize: `${typography.title.size}px`, transform: `translate(${typography.title.x}px, ${typography.title.y}px)` }}
                >
                  {matchInfo.title}
                </motion.h1>
@@ -494,14 +520,14 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                  className="px-10 py-1.5 inline-block transform -skew-x-12 shadow-xl" 
                  style={{ backgroundColor: visualConfig.subtitleBg, transform: `skewX(-12deg) translate(${typography.subtitle.x}px, ${typography.subtitle.y}px)` }}
                >
-                   <span className="tracking-[0.5em] uppercase block transform skew-x-12" style={{ color: visualConfig.subtitleText, fontFamily: typography.subtitle.font, fontWeight: typography.subtitle.weight, fontStyle: typography.subtitle.italic ? 'italic' : 'normal', fontSize: `${typography.subtitle.size}px` }}>{matchInfo.subtitle}</span>
+                   <span className="tracking-[0.5em] uppercase block transform skew-x-12" style={{ color: visualConfig.subtitleText, fontFamily: fraggerFontFamily, fontWeight: typography.subtitle.weight, fontStyle: typography.subtitle.italic ? 'italic' : 'normal', fontSize: `${typography.subtitle.size}px` }}>{matchInfo.subtitle}</span>
                </motion.div>
            </div>
            <div className="flex items-end gap-5">
                {displayFraggers.map((player, idx) => (
                    <motion.div 
-                     key={idx}
-                     initial={{ y: 50, opacity: 0 }}
+                     key={`${player.name}-${player.team}`}
+                     initial={visualOnly ? false : { y: 50, opacity: 0 }}
                      animate={{ y: 0, opacity: 1 }}
                      exit={{ 
                         y: animationConfig.outType === 'slide-down' ? 1000 : (animationConfig.outType === 'slide-up' ? -1000 : 0),
@@ -517,10 +543,10 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                      }}
                      transition={{ delay: 0.2 + (idx * 0.1), duration: 0.5 }}
                      className="relative w-56 flex flex-col items-center pt-10 pb-8 px-4 overflow-hidden shadow-2xl" 
-                     style={{ height: '520px', backgroundColor: visualConfig.cardBgImage ? 'transparent' : visualConfig.cardBg, backgroundImage: visualConfig.cardBgImage ? `url(${visualConfig.cardBgImage})` : 'none', fontFamily: typography.card.font, fontWeight: typography.card.weight, fontStyle: typography.card.italic ? 'italic' : 'normal' }}
+                     style={{ height: '520px', backgroundColor: visualConfig.cardBgImage ? 'transparent' : visualConfig.cardBg, backgroundImage: visualConfig.cardBgImage ? `url(${visualConfig.cardBgImage})` : 'none', fontFamily: fraggerFontFamily, fontWeight: typography.card.weight, fontStyle: typography.card.italic ? 'italic' : 'normal' }}
                    >
                        {/* Rank Badge */}
-                       <div className="absolute top-4 left-4 z-30 opacity-90" style={{ color: visualConfig.rankColor, fontFamily: typography.rank.font, fontWeight: typography.rank.weight, fontStyle: typography.rank.italic ? 'italic' : 'normal', fontSize: `${typography.rank.size}px` }}>#{idx + 1}</div>
+                       <div className="absolute top-4 left-4 z-30 opacity-90" style={{ color: visualConfig.rankColor, fontFamily: fraggerFontFamily, fontWeight: typography.rank.weight, fontStyle: typography.rank.italic ? 'italic' : 'normal', fontSize: `${typography.rank.size}px` }}>#{idx + 1}</div>
                        
                        {/* Top Right Icon/Badge from Reference */}
                        <div className="absolute top-4 right-4 z-30">
@@ -563,18 +589,18 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
                        <div className="w-full text-center z-20 space-y-6">
                            <div className="space-y-1">
-                               <h3 className="uppercase leading-none truncate" style={{ color: visualConfig.playerNameColor, fontSize: `${cardLayout.playerNameSize}px`, fontWeight: '950' }}>{player.name}</h3>
-                               <p className="font-black uppercase tracking-[0.2em]" style={{ color: visualConfig.teamNameColor, fontSize: `${cardLayout.teamNameSize}px`, opacity: 0.8 }}>{player.team}</p>
+                               <h3 className="uppercase leading-none truncate" style={{ color: visualConfig.playerNameColor, fontFamily: fraggerFontFamily, fontSize: `${cardLayout.playerNameSize}px`, fontWeight: '950' }}>{player.name}</h3>
+                               <p className="font-black uppercase tracking-[0.2em]" style={{ color: visualConfig.teamNameColor, fontFamily: fraggerFontFamily, fontSize: `${cardLayout.teamNameSize}px`, opacity: 0.8 }}>{player.team}</p>
                            </div>
 
                            <div className="space-y-2 w-full">
                                <div className="mx-2 py-3 rounded-lg" style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                                   <span className="block leading-none font-black" style={{ color: visualConfig.elimsColor, fontSize: `${cardLayout.elimsSize}px` }}>{player.elims}</span>
-                                   <span className="block text-[10px] font-black uppercase tracking-[0.4em] mt-1.5" style={{ color: visualConfig.elimsColor, opacity: 0.6 }}>ELIMS</span>
+                                   <span className="block leading-none font-black" style={{ color: visualConfig.elimsColor, fontFamily: fraggerFontFamily, fontSize: `${cardLayout.elimsSize}px` }}>{player.elims}</span>
+                                   <span className="block text-[10px] font-black uppercase tracking-[0.4em] mt-1.5" style={{ color: visualConfig.elimsColor, fontFamily: fraggerFontFamily, opacity: 0.6 }}>ELIMS</span>
                                </div>
                                <div className="mx-2 py-3 rounded-lg" style={{ backgroundColor: 'rgba(0,0,0,0.08)' }}>
-                                   <span className="block font-black leading-none" style={{ color: visualConfig.survivalColor, fontSize: `${cardLayout.survivalSize}px` }}>{player.survival}</span>
-                                   <span className="block text-[8px] font-black uppercase tracking-[0.4em] mt-1.5" style={{ color: visualConfig.survivalColor, opacity: 0.6 }}>SURVIVAL TIME</span>
+                                   <span className="block font-black leading-none" style={{ color: visualConfig.survivalColor, fontFamily: fraggerFontFamily, fontSize: `${cardLayout.survivalSize}px` }}>{player.survival}</span>
+                                   <span className="block text-[8px] font-black uppercase tracking-[0.4em] mt-1.5" style={{ color: visualConfig.survivalColor, fontFamily: fraggerFontFamily, opacity: 0.6 }}>SURVIVAL TIME</span>
                                </div>
                            </div>
                        </div>
@@ -583,7 +609,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
            </div>
        </motion.div>
     </motion.div>
-  ), [visualConfig, typography, matchInfo, displayFraggers, cardLayout, animationConfig, globalLogo, style, visualOnly, getAssetAnimationVariants]);
+  ), [visualConfig, typography, fraggerFontFamily, matchInfo, displayFraggers, cardLayout, animationConfig, globalLogo, style, visualOnly, getAssetAnimationVariants]);
 
 
   // Sync preview content to parent
@@ -710,11 +736,38 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                                 <div className="bg-zinc-900 border border-white/5 rounded-[20px] p-6 space-y-4"><div className="flex items-center gap-2 mb-2"><Type size={14} className="text-zinc-500" /><h3 className="text-[10px] font-black text-zinc-400 tracking-[0.2em] uppercase">SUBTITLE</h3></div><input type="text" value={matchInfo.subtitle} onChange={(e) => setMatchInfo({...matchInfo, subtitle: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-xs font-bold text-white uppercase outline-none focus:border-[#ccff00]" /><div className="grid grid-cols-3 gap-2"><div><label className="text-[8px] font-black text-zinc-600 uppercase mb-1">SIZE</label><ScrollableInput value={typography.subtitle.size} onChange={(val) => setTypography(prev => ({...prev, subtitle: {...prev.subtitle, size: val}}))} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white text-center" /></div><div><label className="text-[8px] font-black text-zinc-600 uppercase mb-1">X</label><ScrollableInput value={typography.subtitle.x} onChange={(val) => setTypography(prev => ({...prev, subtitle: {...prev.subtitle, x: val}}))} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white text-center" /></div><div><label className="text-[8px] font-black text-zinc-600 uppercase mb-1">Y</label><ScrollableInput value={typography.subtitle.y} onChange={(val) => setTypography(prev => ({...prev, subtitle: {...prev.subtitle, y: val}}))} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white text-center" /></div></div></div>
                              </div>
 
+                             <div className="bg-zinc-900/80 border border-white/10 rounded-2xl p-4 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.25em]">
+                                      MATCH {currentMatch} · {aliveTeamCount} tim hidup
+                                    </p>
+                                    <p className="text-[7px] text-zinc-600 normal-case mt-1 leading-relaxed">
+                                      {matchReadyForFraggerSync
+                                        ? 'Winner / 1 tim tersisa — Top 5 otomatis dari kill match + Project DB.'
+                                        : 'Kill mengikuti Overall Ranking. Saat winner, slot terisi otomatis.'}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => syncTopFraggersFromMatch(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-[#ccff00]/10 border border-[#ccff00]/30 text-[#ccff00] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#ccff00] hover:text-black transition-all"
+                                  >
+                                    <Database size={12} />
+                                    SYNC TOP 5 FROM MATCH
+                                  </button>
+                                </div>
+                                {projectPlayers.length === 0 && (
+                                  <p className="text-[7px] text-amber-500/90 normal-case leading-relaxed border border-amber-500/20 bg-amber-500/5 rounded-lg px-3 py-2">
+                                    Project DB kosong di layar ini. Buka asset dari <strong className="font-black">Global Studio</strong> / project yang punya roster pemain agar tombol LOAD FROM PROJECT DB aktif.
+                                  </p>
+                                )}
+                             </div>
+
                              <div className="space-y-2">
-                                <div className="flex items-center justify-between mb-4">
-<h3 className="text-[8px] font-black text-zinc-600 tracking-[0.4em] uppercase italic">FRAGGER DATA_NODES</h3>
-<button onClick={resetFraggers} className="text-[7px] font-black text-red-500 uppercase tracking-widest hover:text-red-700 bg-red-500/10 px-2 py-1 rounded">RESET ALL</button>
-</div>
+                                <h3 className="text-[8px] font-black text-zinc-600 tracking-[0.4em] uppercase italic mb-4">
+                                  FRAGGER DATA_NODES
+                                </h3>
                                 {fraggers.map((player, idx) => (
                                     <div key={idx} className="bg-zinc-900/50 border border-white/5 p-4 rounded-2xl hover:border-[#ccff00]/20 transition-all group flex flex-col gap-4">
                                         <div className="flex items-center justify-between">
@@ -745,6 +798,21 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
                     {configTab === 'VISUAL' && (
                         <div className="space-y-6 animate-in fade-in duration-300">
+                           <div className="p-6 bg-zinc-900 border border-white/5 rounded-[20px] shadow-sm">
+                                <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                                  <Type size={12} className="text-[#ccff00]" />
+                                  Jenis font (Top Fragger)
+                                </h3>
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 leading-relaxed">
+                                  Judul, subtitle, rank kartu, nama player, tim, ELIMS, dan SURVIVAL TIME.
+                                </p>
+                                <OverlayFontFamilySelect
+                                  value={(typography as { fontFamilyId?: string }).fontFamilyId}
+                                  onChange={(fontFamilyId) =>
+                                    setTypography((prev) => ({ ...prev, fontFamilyId }))
+                                  }
+                                />
+                           </div>
                            <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
                                 <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3">GLOBAL COLORS</h4>
                                 <div className="grid grid-cols-3 gap-4">
@@ -942,6 +1010,12 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                         <div className="absolute left-6 -top-2 bg-[#0c0c0c] px-2 text-[8px] font-black text-zinc-600 tracking-[0.2em] uppercase pointer-events-none">FILTER BY TEAM</div>
                     </div>
 
+                    <p className="text-[7px] text-zinc-500 normal-case leading-relaxed px-1">
+                      {selectedTeamFilter === 'ALL'
+                        ? `Semua tim · ${filteredDbPlayers.length} pemain · urut kill tertinggi (match ${currentMatch})`
+                        : `${selectedTeamFilter} · ${filteredDbPlayers.length} pemain · urut kill tim`}
+                    </p>
+
                     <div className="relative group">
                         <input 
                             type="text" 
@@ -956,12 +1030,17 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                 {/* Results List Area */}
                 <div className="flex-1 overflow-y-auto px-8 pb-10 custom-scrollbar space-y-3">
                     {filteredDbPlayers.length > 0 ? (
-                        filteredDbPlayers.map((p) => (
+                        filteredDbPlayers.map((p, listIdx) => (
                             <button 
-                                key={p.id}
+                                key={p.id || `${p.team}-${p.name}`}
                                 onClick={() => handleLoadFromDb(isDbSelectorOpen.rankIndex, p)}
                                 className="w-full bg-[#151515] border border-white/5 p-5 rounded-[24px] hover:border-[#ccff00]/40 transition-all flex items-center gap-6 group text-left shadow-sm"
                             >
+                                <div className="w-10 shrink-0 flex flex-col items-center justify-center">
+                                  <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">#{listIdx + 1}</span>
+                                  <span className="text-lg font-[1000] text-[#ccff00] leading-none tabular-nums">{p.elims}</span>
+                                  <span className="text-[7px] font-black text-zinc-600 uppercase">K</span>
+                                </div>
                                 {/* Initial / Profile Icon */}
                                 <div className="w-14 h-14 rounded-2xl bg-[#0c0c0c] border border-white/5 flex items-center justify-center shrink-0 shadow-inner group-hover:border-[#ccff00]/20 transition-all overflow-hidden">
                                     {p.image ? (
@@ -975,10 +1054,13 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                                     <h4 className="text-3xl font-[1000] text-white uppercase tracking-tighter leading-[0.8] mb-2 group-hover:text-[#ccff00] transition-colors truncate">
                                         {p.name}
                                     </h4>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <Shield size={12} className="text-zinc-600 group-hover:text-blue-500 transition-colors" />
                                         <span className="text-[10px] font-black text-zinc-600 group-hover:text-zinc-400 uppercase tracking-[0.2em] transition-colors">
                                             {p.team}
+                                        </span>
+                                        <span className="text-[9px] font-black text-[#ccff00] uppercase tracking-widest px-2 py-0.5 rounded bg-[#ccff00]/10 border border-[#ccff00]/20">
+                                          {p.elims ?? 0} K · M{currentMatch}
                                         </span>
                                     </div>
                                 </div>
@@ -989,9 +1071,18 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                             </button>
                         ))
                     ) : (
-                        <div className="py-12 text-center opacity-20 border border-dashed border-white/10 rounded-[32px]">
-                            <User size={48} className="mx-auto mb-4" />
-                            <p className="text-[10px] font-black uppercase tracking-widest">NO DATABASE MATCH FOUND</p>
+                        <div className="py-12 text-center border border-dashed border-white/10 rounded-[32px] px-6">
+                            <User size={48} className="mx-auto mb-4 text-zinc-700" />
+                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                              {personnelDbRows.length === 0
+                                ? 'BELUM ADA DATA PEMAIN'
+                                : 'TIDAK ADA PEMAIN SESUAI FILTER'}
+                            </p>
+                            <p className="text-[8px] text-zinc-600 normal-case mt-2 leading-relaxed">
+                              {personnelDbRows.length === 0
+                                ? 'Isi roster di Project DB atau nama pemain di Overall Ranking (DATA), lalu buka modal ini lagi.'
+                                : 'Coba ALL TEAMS atau kosongkan kolom pencarian.'}
+                            </p>
                         </div>
                     )}
                 </div>

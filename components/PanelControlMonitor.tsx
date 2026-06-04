@@ -263,13 +263,13 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                         className="w-[1920px] h-[1080px] shrink-0 flex items-center justify-center origin-center pointer-events-none transition-transform duration-200 ease-out relative"
                         style={{ transform: `scale(${currentScale})` }}
                     >
-                        <AnimatePresence mode="popLayout">
+                        <AnimatePresence mode="sync" initial={false}>
                           {programPreview && (
                             <motion.div 
-                              key={React.isValidElement(programPreview) ? ((programPreview.type as any)?.name || 'program-element') : 'program-static'} 
-                              initial={{ opacity: 0 }}
+                              key="program-feed-stable"
+                              initial={false}
                               animate={{ opacity: 1 }}
-                              exit={{ opacity: 0, transition: { duration: 1.2 } }}
+                              exit={{ opacity: 0, transition: { duration: 0.15 } }}
                               className="w-full h-full flex items-center justify-center pointer-events-none"
                             >
                               {programPreview}
@@ -462,13 +462,13 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                             style={{ transform: `scale(${currentScale})` }}
                         >
                             <PreviewControlContext.Provider value={{ playKey, isLooping, isPreviewPlaying, replay }}>
-                                <AnimatePresence mode="popLayout" initial={false}>
+                                <AnimatePresence mode="wait" initial={false}>
                                   {customPreview && (
                                     <motion.div 
-                                      key={React.isValidElement(customPreview) ? `${((customPreview.type as any)?.name || 'custom-element')}-${playKey}` : `custom-static-${playKey}`}
+                                      key={`preview-feed-${playKey}`}
                                       initial={{ opacity: 0 }}
                                       animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0, transition: { duration: 1.2 } }}
+                                      exit={{ opacity: 0, transition: { duration: 0.2 } }}
                                       className="w-full h-full flex items-center justify-center pointer-events-none"
                                     >
                                       {customPreview}

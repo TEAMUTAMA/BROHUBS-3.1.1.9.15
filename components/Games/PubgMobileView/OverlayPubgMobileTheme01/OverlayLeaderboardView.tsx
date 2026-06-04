@@ -8,13 +8,32 @@ import {
   Shield, X, Trophy, Skull, Zap, AlertTriangle, Target,
   Monitor, ChevronUp, AlertCircle, ShieldCheck, Info,
   ListOrdered, Flag, Search, Globe, Play, Square, Save,
-  ArrowDownLeft, ArrowUpRight, Maximize2, Minimize2
+  ArrowDownLeft, ArrowUpRight, Maximize2, Minimize2, Undo2, Link2, Image, Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Theme, Asset, Game, PlayerData } from '../../../../types';
 import PanelControlMonitor, { PreviewControlContext } from '../../../PanelControlMonitor';
 import PlacementScoringModal from '../PlacementScoringModal';
-import TieBreakerModal, { TieBreakerCriteria } from '../TieBreakerModal';
+import TieBreakerModal, { TieBreakerCriteria, TieBreakerConfig } from '../TieBreakerModal';
+import ElimCauseModal from '../ElimCauseModal';
+import KillVictimModal from '../KillVictimModal';
+import KnockAttackerModal from '../KnockAttackerModal';
+import {
+  applyKnockAction,
+  applyManualElimAction,
+  applyFinishAction,
+  undoKillFeedEvent,
+  cloneLeaderboardTeams,
+  findLastKillEventIndexForTeam,
+  isTeamEliminationSealed,
+  countAlivePlayers,
+  getPlayerStatus,
+  DEFAULT_MATCH_KILL_RULES,
+  type PlayerRef,
+  type KillFeedEvent,
+  type MatchKillRules,
+  type FinishCredit,
+} from '@/lib/leaderboardKillLogic';
 
 interface Team {
   rank: number;
@@ -25,6 +44,8 @@ interface Team {
   status: number[];
   playerNames: string[];
   playerKills: number[];
+  playerFinishCredit?: Array<FinishCredit | null>;
+  playerKnockCredit?: Array<FinishCredit | null>;
   points: number;
   totalPlacementPoints: number;
   totalWwcds: number;
@@ -33,7 +54,7 @@ interface Team {
   placementRank: number | null;
 }
 
-interface VisualConfig {
+interface VisualConfig extends EliminationBannerVisual {
   headerBg: string;
   headerText: string;
   rowEvenBg: string;
@@ -52,6 +73,13 @@ interface VisualConfig {
   winnerText: string;
   statusBorder: string;
   statusText: string;
+  leaderboardPanelBgImage: string;
+  headerBgImage: string;
+  rowEvenBgImage: string;
+  rowOddBgImage: string;
+  eliminatedBgImage: string;
+  winnerBgImage: string;
+  leaderboardDesignMode: LeaderboardDesignMode;
 }
 
 interface LayoutConfig {
@@ -62,7 +90,27 @@ interface LayoutConfig {
   fontSize: number;
   logoSize: number;
   flagWidth: number;
+  /** Lebar panel leaderboard (px) */
+  panelWidth?: number;
+  /** ID font — lihat OVERLAY_FONT_FAMILY_OPTIONS */
+  fontFamilyId?: string;
 }
+
+interface EliminationBannerLayout {
+  scale: number;
+  /** Geser dari tengah horizontal — positif = kanan */
+  xOffset: number;
+  /** Jarak dari atas canvas (px) */
+  yOffset: number;
+}
+
+const STAGED_ELIM_PREVIEW_ALERT_ID = 'brohubs-elim-banner-staged-preview';
+
+const DEFAULT_ELIMINATION_BANNER_LAYOUT: EliminationBannerLayout = {
+  scale: 100,
+  xOffset: 280,
+  yOffset: 72,
+};
 
 import {
   AnimationConfig,
@@ -72,6 +120,84 @@ import {
 } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 import { notifyCompanionData } from '@/lib/overlayData';
+import TeamEliminatedBanner from '../TeamEliminatedBanner';
+import { useOverlayFonts } from '../useEliminationBannerFonts';
+import OverlayFontFamilySelect from '../../../OverlayFontFamilySelect';
+import {
+  DEFAULT_OVERLAY_FONT_FAMILY_ID,
+  getOverlayFontCssFamily,
+  resolveOverlayFontFamilyId,
+} from '@/lib/eliminationBannerFonts';
+import {
+  TEAM_ELIMINATION_ALERT_KEY,
+  type TeamEliminationAlert,
+} from '@/lib/teamEliminationAlert';
+import {
+  buildTopFraggersFromMatch,
+  isMatchReadyForTopFraggerSync,
+} from '@/lib/topFraggersSync';
+import {
+  applyMatchEndPlacementRanks,
+  finalizeTeamAtIndex,
+  getTeamsInContention,
+  isTeamMatchEliminated,
+  resetCurrentMatchTeamState,
+  teamHasAlivePlayer,
+  totalTeamKills,
+} from '@/lib/matchPlacements';
+import { createEventId } from '@/lib/leaderboardKillLogic';
+import type {
+  EliminationBannerVisual,
+  EliminationBannerImageKey,
+  EliminationBannerFullImageFit,
+} from '@/lib/eliminationBannerVisual';
+import {
+  DEFAULT_ELIMINATION_BANNER_VISUAL,
+  DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT,
+  DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+  ELIMINATION_BANNER_FONT_KEYS_PANEL,
+  ELIMINATION_BANNER_FONT_KEYS_CUSTOM_IMAGE,
+  ELIMINATION_BANNER_FONT_LABELS,
+  type EliminationBannerFontKey,
+  resolveEliminationBannerTypography,
+  ELIMINATION_BANNER_COLOR_KEYS,
+  ELIMINATION_BANNER_TEXT_COLOR_KEYS,
+  ELIMINATION_BANNER_TEXT_COLOR_KEYS_CUSTOM_IMAGE,
+  ELIMINATION_BANNER_COLOR_LABELS,
+  ELIMINATION_BANNER_CUSTOM_PANEL_IMAGE_KEYS,
+  ELIMINATION_BANNER_CUSTOM_IMAGE_VARIANT_LABELS,
+  type EliminationBannerCustomImageVariant,
+  ELIMINATION_BANNER_IMAGE_LABELS,
+  ELIMINATION_BANNER_IMAGE_SIZE_HINTS,
+  ELIMINATION_BANNER_IMAGE_LINK_NOTE,
+  ELIMINATION_BANNER_FULL_IMAGE_FIT_LABELS,
+  ELIMINATION_BANNER_FULL_IMAGE_FIT_NOTE,
+  ELIMINATION_BANNER_FULL_LAYOUT_NOTE,
+  pickEliminationBannerVisual,
+  type EliminationBannerFullOverlayLayout,
+  ELIMINATION_BANNER_FONT_FAMILY_OPTIONS,
+  DEFAULT_ELIMINATION_BANNER_FONT_FAMILY_ID,
+  getEliminationBannerFontCssFamily,
+  resolveEliminationBannerFontFamilyId,
+} from '@/lib/eliminationBannerVisual';
+import {
+  DEFAULT_LEADERBOARD_BACKGROUND_IMAGES,
+  DEFAULT_LEADERBOARD_DESIGN_MODE,
+  LEADERBOARD_DESIGN_MODE_LABELS,
+  LEADERBOARD_BG_IMAGE_KEYS,
+  LEADERBOARD_BG_IMAGE_LABELS,
+  LEADERBOARD_BG_IMAGE_HINTS,
+  LEADERBOARD_PANEL_BG_COLOR_KEYS,
+  LEADERBOARD_TEXT_COLOR_KEYS,
+  LEADERBOARD_COLOR_LABELS,
+  type LeaderboardBgImageKey,
+  type LeaderboardDesignMode,
+  resolveLeaderboardSurfaceStyle,
+  hasLeaderboardBgImage,
+  isLeaderboardPanelDesignMode,
+  leaderboardPanelWidthForFlags,
+  resolveLeaderboardPanelWidth,
+} from '@/lib/leaderboardVisual';
 
 interface OverlayLeaderboardViewProps {
   asset: Asset;
@@ -105,31 +231,56 @@ const COUNTRIES = [
   { code: 'GB', name: 'United Kingdom' }, { code: 'DE', name: 'Germany' }, { code: 'FR', name: 'France' }
 ].sort((a, b) => a.name.localeCompare(b.name));
 
-const ScrollableInput = ({ 
-  value, 
-  onChange, 
-  className 
-}: { 
-  value: number; 
-  onChange: (val: number) => void; 
+/** Easing halus saat flag on/off (panel + kolom bendera) */
+const LEADERBOARD_FLAG_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const LEADERBOARD_FLAG_LAYOUT_TRANSITION = `width 0.65s ${LEADERBOARD_FLAG_EASE}, opacity 0.55s ${LEADERBOARD_FLAG_EASE}, margin 0.65s ${LEADERBOARD_FLAG_EASE}, transform 0.55s ${LEADERBOARD_FLAG_EASE}`;
+const LEADERBOARD_PANEL_WIDTH_TRANSITION = `width 0.65s ${LEADERBOARD_FLAG_EASE}`;
+
+const ScrollableInput = ({
+  value,
+  onChange,
+  className,
+}: {
+  value: number;
+  onChange: (val: number) => void;
   className?: string;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+
   useEffect(() => {
     const element = inputRef.current;
     if (!element) return;
     const handleWheel = (e: WheelEvent) => {
-      if (document.activeElement === element) {
-        e.preventDefault();
-        e.stopPropagation();
-        const delta = e.deltaY > 0 ? -1 : 1;
-        onChange(value + delta);
-      }
+      if (document.activeElement !== element) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY > 0 ? -1 : 1;
+      onChangeRef.current(valueRef.current + delta);
     };
     element.addEventListener('wheel', handleWheel, { passive: false });
     return () => element.removeEventListener('wheel', handleWheel);
-  }, [value, onChange]);
-  return <input ref={inputRef} type="number" value={value} onChange={(e) => onChange(Number(e.target.value))} className={className} />;
+  }, []);
+
+  const safeValue = Number.isFinite(value) ? value : 0;
+
+  return (
+    <input
+      ref={inputRef}
+      type="number"
+      value={safeValue}
+      onChange={(e) => {
+        const raw = e.target.value.trim();
+        if (raw === '' || raw === '-') return;
+        const next = Number(raw);
+        if (Number.isFinite(next)) onChange(next);
+      }}
+      className={className}
+    />
+  );
 };
 
 const deriveTeamAbbreviation = (teamName: string): string => {
@@ -172,6 +323,8 @@ const INITIAL_LEADERBOARD_DATA = Array.from({ length: 16 }, (_, i) => ({
   status: [1, 1, 1, 1], // 0:Dead, 1:Alive, 2:Knock
   playerNames: ['P1', 'P2', 'P3', 'P4'],
   playerKills: [0, 0, 0, 0],
+  playerFinishCredit: [null, null, null, null],
+  playerKnockCredit: [null, null, null, null],
   points: 0,
   totalPlacementPoints: 0, 
   totalWwcds: 0, 
@@ -180,7 +333,7 @@ const INITIAL_LEADERBOARD_DATA = Array.from({ length: 16 }, (_, i) => ({
   placementRank: null as number | null 
 }));
 
-const INITIAL_VISUAL_CONFIG = {
+const INITIAL_VISUAL_CONFIG: VisualConfig = {
   headerBg: '#74a57f',
   headerText: '#ffffff',
   rowEvenBg: '#e8e6df',
@@ -198,14 +351,21 @@ const INITIAL_VISUAL_CONFIG = {
   winnerBg: '#ccff00',
   winnerText: '#000000',
   statusBorder: '#000000',
-  statusText: '#ffffff'
+  statusText: '#ffffff',
+  ...DEFAULT_LEADERBOARD_BACKGROUND_IMAGES,
+  leaderboardDesignMode: DEFAULT_LEADERBOARD_DESIGN_MODE,
+  ...DEFAULT_ELIMINATION_BANNER_VISUAL,
 };
 
 const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({ 
   asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
   programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
 }) => {
+  useOverlayFonts();
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
+  const [visualSettingsPanel, setVisualSettingsPanel] = useState<
+    'choose' | 'leaderboard' | 'elimination'
+  >('choose');
   const [showList, setShowList] = useState(true);
   const [showMonitors, setShowMonitors] = useState(true);
 
@@ -262,6 +422,15 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const [nextPlacementRank, setNextPlacementRank] = useState(16);
 
   const [activePopups, setActivePopups] = useState<number[]>([]);
+  const [eliminationAlert, setEliminationAlert] = useSharedState<TeamEliminationAlert | null>(
+    TEAM_ELIMINATION_ALERT_KEY,
+    null
+  );
+  const eliminationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eliminationQueueRef = useRef<TeamEliminationAlert[]>([]);
+  const eliminationShowingRef = useRef(false);
+  const seenEliminationsRef = useRef<Set<string>>(new Set());
+  const eliminationsInitializedRef = useRef(false);
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
   const [isTieBreakerModalOpen, setIsTieBreakerModalOpen] = useState(false);
@@ -276,6 +445,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const [tieBreakerOrder, setTieBreakerOrder] = useState<TieBreakerCriteria[]>([
     'TOTAL_POINTS', 'TOTAL_WWCD', 'TOTAL_PLACEMENT', 'ALIVE_PLAYERS', 'MATCH_KILLS', 'SLOT_RANK'
   ]);
+  const [matchKillRulesByMatch, setMatchKillRulesByMatch] = useSharedState<Record<string, MatchKillRules>>(
+    'BROHUBS_LEADERBOARD_MATCH_KILL_RULES',
+    { '1': DEFAULT_MATCH_KILL_RULES }
+  );
+  const [killEventLog, setKillEventLog] = useSharedState<KillFeedEvent[]>('BROHUBS_LEADERBOARD_KILL_LOG', []);
+  const [elimModalVictim, setElimModalVictim] = useState<PlayerRef | null>(null);
+  const [killVictimModalFinisher, setKillVictimModalFinisher] = useState<PlayerRef | null>(null);
+  const [knockAttackerModalVictim, setKnockAttackerModalVictim] = useState<PlayerRef | null>(null);
+
+  const matchKillRules: MatchKillRules =
+    matchKillRulesByMatch[String(currentMatch)] ?? DEFAULT_MATCH_KILL_RULES;
 
   const [isDbSelectorOpen, setIsDbSelectorOpen] = useState<{ rankIndex: number } | null>(null);
   const [dbSearch, setDbSearch] = useState('');
@@ -316,7 +496,129 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     setTimeout(() => setShowOverlay(true), 1000);
   };
 
-  const [visualConfig, setVisualConfig] = useSharedState<VisualConfig>('BROHUBS_LEADERBOARD_VISUAL', INITIAL_VISUAL_CONFIG);
+  const [visualConfig, setVisualConfig] = useSharedState<VisualConfig>(
+    'BROHUBS_LEADERBOARD_VISUAL',
+    INITIAL_VISUAL_CONFIG
+  );
+
+  const elimBannerVisual = useMemo(
+    () => pickEliminationBannerVisual(visualConfig),
+    [visualConfig]
+  );
+
+  const elimBannerTypography = useMemo(
+    () => resolveEliminationBannerTypography(elimBannerVisual),
+    [elimBannerVisual]
+  );
+
+  const elimBannerFontFamilyId = useMemo(
+    () => resolveEliminationBannerFontFamilyId(visualConfig.elimBannerFontFamily),
+    [visualConfig.elimBannerFontFamily]
+  );
+
+  useEffect(() => {
+    setVisualConfig((prev) => {
+      const needsElimMerge = (
+        Object.keys(DEFAULT_ELIMINATION_BANNER_VISUAL) as (keyof EliminationBannerVisual)[]
+      ).some((k) => (prev as VisualConfig)[k] === undefined);
+      const needsLeaderboardBgMerge = LEADERBOARD_BG_IMAGE_KEYS.some(
+        (k) => (prev as VisualConfig)[k] === undefined
+      );
+      const needsLeaderboardModeMerge =
+        (prev as VisualConfig).leaderboardDesignMode === undefined;
+      if (!needsElimMerge && !needsLeaderboardBgMerge && !needsLeaderboardModeMerge) {
+        return prev;
+      }
+      return { ...INITIAL_VISUAL_CONFIG, ...prev };
+    });
+  }, [setVisualConfig]);
+
+  const handleElimBannerImageUpload = (
+    key: EliminationBannerImageKey,
+    file: File | undefined
+  ) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      setVisualConfig((prev) => ({ ...prev, [key]: result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleLeaderboardBgImageUpload = (
+    key: LeaderboardBgImageKey,
+    file: File | undefined
+  ) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      setVisualConfig((prev) => ({ ...prev, [key]: result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const fullLayout =
+    visualConfig.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+
+  const patchElimBannerTypography = (key: EliminationBannerFontKey, value: number) => {
+    setVisualConfig((prev) => {
+      const typo = {
+        ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+        ...prev.elimBannerTypography,
+        [key]: value,
+      };
+      const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+      const nextLayout = { ...current };
+      if (key === 'placement') {
+        nextLayout.placement = { ...current.placement, fontSize: value };
+      }
+      if (key === 'tag') {
+        nextLayout.teamName = { ...current.teamName, fontSize: value };
+      }
+      return {
+        ...prev,
+        elimBannerTypography: typo,
+        elimBannerFullLayout:
+          key === 'placement' || key === 'tag' ? nextLayout : current,
+      };
+    });
+  };
+
+  const patchElimBannerFullLayout = <
+    K extends keyof EliminationBannerFullOverlayLayout,
+  >(
+    section: K,
+    patch: Partial<EliminationBannerFullOverlayLayout[K]>
+  ) => {
+    setVisualConfig((prev) => {
+      const current = prev.elimBannerFullLayout ?? DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT;
+      const nextSection = { ...current[section], ...patch };
+      const nextLayout = {
+        ...current,
+        [section]: nextSection,
+      };
+      const typo = {
+        ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+        ...prev.elimBannerTypography,
+      };
+      if (section === 'placement' && patch.fontSize !== undefined) {
+        typo.placement = patch.fontSize;
+      }
+      if (section === 'teamName' && patch.fontSize !== undefined) {
+        typo.tag = patch.fontSize;
+      }
+      const typoChanged =
+        (section === 'placement' && patch.fontSize !== undefined) ||
+        (section === 'teamName' && patch.fontSize !== undefined);
+      return {
+        ...prev,
+        elimBannerFullLayout: nextLayout,
+        ...(typoChanged ? { elimBannerTypography: typo } : {}),
+      };
+    });
+  };
 
   const [layoutConfig, setLayoutConfig] = useSharedState<LayoutConfig>('BROHUBS_LEADERBOARD_LAYOUT', {
       scale: 80,
@@ -325,8 +627,54 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       rowHeight: 52,
       fontSize: 18,
       logoSize: 32,
-      flagWidth: 24
+      flagWidth: 24,
+      panelWidth: leaderboardPanelWidthForFlags(true),
+      fontFamilyId: DEFAULT_OVERLAY_FONT_FAMILY_ID,
   });
+
+  const leaderboardPanelWidth = useMemo(
+    () =>
+      resolveLeaderboardPanelWidth(
+        layoutConfig.panelWidth,
+        visualConfig.showFlags
+      ),
+    [layoutConfig.panelWidth, visualConfig.showFlags]
+  );
+
+  const toggleLeaderboardFlags = useCallback(() => {
+    const nextShowFlags = !visualConfig.showFlags;
+    setVisualConfig((v) => ({ ...v, showFlags: nextShowFlags }));
+    setLayoutConfig((lc) => ({
+      ...lc,
+      panelWidth: leaderboardPanelWidthForFlags(nextShowFlags),
+    }));
+  }, [visualConfig.showFlags, setVisualConfig, setLayoutConfig]);
+
+  useEffect(() => {
+    setLayoutConfig((prev) => {
+      const legacyDefaults = [420, 350, 400, 360];
+      const needsFlagWidth =
+        prev.panelWidth === undefined || legacyDefaults.includes(prev.panelWidth);
+      if (!needsFlagWidth) return prev;
+      return {
+        ...prev,
+        panelWidth: leaderboardPanelWidthForFlags(visualConfig.showFlags),
+      };
+    });
+  }, [setLayoutConfig, visualConfig.showFlags]);
+
+  const leaderboardFontFamily = useMemo(
+    () =>
+      getOverlayFontCssFamily(
+        resolveOverlayFontFamilyId(layoutConfig.fontFamilyId)
+      ),
+    [layoutConfig.fontFamilyId]
+  );
+
+  const [elimBannerLayout, setElimBannerLayout] = useSharedState<EliminationBannerLayout>(
+    'BROHUBS_ELIMINATION_BANNER_LAYOUT',
+    DEFAULT_ELIMINATION_BANNER_LAYOUT
+  );
 
   const [animationConfig, setAnimationConfig] = useSharedState<AnimationConfig>('BROHUBS_LEADERBOARD_ANIMATION', {
       mode: 'default',
@@ -426,25 +774,256 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   useEffect(() => {
     setTeams((prev) => {
-      const next = prev.map((team) => ensureTeamAbbreviation(team, projectPlayers));
-      const changed = next.some((team, index) => team.teamAbbreviation !== prev[index]?.teamAbbreviation);
+      const next = prev.map((team) => {
+        const withAbbr = ensureTeamAbbreviation(team, projectPlayers);
+        const withFinish =
+          withAbbr.playerFinishCredit?.length === 4
+            ? withAbbr
+            : { ...withAbbr, playerFinishCredit: [null, null, null, null] };
+        if (withFinish.playerKnockCredit?.length === 4) return withFinish;
+        return { ...withFinish, playerKnockCredit: [null, null, null, null] };
+      });
+      const changed = next.some(
+        (team, index) =>
+          team.teamAbbreviation !== prev[index]?.teamAbbreviation ||
+          !prev[index]?.playerFinishCredit ||
+          !prev[index]?.playerKnockCredit
+      );
       return changed ? next : prev;
     });
-  }, [teams, projectPlayers, setTeams]);
+  }, [projectPlayers]);
 
   // Persistence Effects removed as useSharedState handles it
 
-  const aliveTeams = teams.filter(t => t.active && !t.status.every(s => s === 0));
-  const aliveCount = aliveTeams.length;
-  const isMatchReadyToEnd = aliveCount === 1;
-  const matchWinner = isMatchReadyToEnd ? aliveTeams[0] : null;
+  useEffect(() => {
+    return () => {
+      if (eliminationClearTimerRef.current) {
+        clearTimeout(eliminationClearTimerRef.current);
+      }
+    };
+  }, []);
 
-  const showEliminationPopup = (rank: number) => {
-    setActivePopups(prev => [...prev, rank]);
+  const aliveTeams = teams.filter((t) => t.active && !t.status.every((s) => s === 0));
+  const aliveCount = aliveTeams.length;
+  const teamsInContention = getTeamsInContention(teams);
+  const contentionCount = teamsInContention.length;
+  /** Bisa lanjut match berikutnya jika tersisa ≤2 tim tanpa placement (WWCD / top 2) */
+  const isMatchReadyToEnd = contentionCount <= 2;
+  const matchWinnerCandidate = useMemo(() => {
+    if (teamsInContention.length === 0) return null;
+    return [...teamsInContention].sort(
+      (a, b) => totalTeamKills(b) - totalTeamKills(a)
+    )[0];
+  }, [teams]);
+  const matchRunnerUp = useMemo(() => {
+    if (teamsInContention.length < 2) return null;
+    return [...teamsInContention].sort(
+      (a, b) => totalTeamKills(b) - totalTeamKills(a)
+    )[1];
+  }, [teams]);
+
+  const pushEliminationToCompanion = useCallback(
+    (alert: TeamEliminationAlert | null) => {
+      if (visualOnly) return;
+      notifyCompanionData({
+        assetId: asset.id,
+        data: { [TEAM_ELIMINATION_ALERT_KEY]: alert },
+      });
+    },
+    [asset.id, visualOnly]
+  );
+
+  const playNextEliminationBanner = useCallback(() => {
+    if (eliminationShowingRef.current) return;
+    const next = eliminationQueueRef.current.shift();
+    if (!next) return;
+
+    eliminationShowingRef.current = true;
+    setEliminationAlert(next);
+    pushEliminationToCompanion(next);
+
+    setActivePopups((prev) =>
+      prev.includes(next.teamRank) ? prev : [...prev, next.teamRank]
+    );
     setTimeout(() => {
-        setActivePopups(prev => prev.filter(r => r !== rank));
-    }, 3000); 
-  };
+      setActivePopups((prev) => prev.filter((r) => r !== next.teamRank));
+    }, 4000);
+
+    if (eliminationClearTimerRef.current) {
+      clearTimeout(eliminationClearTimerRef.current);
+    }
+    eliminationClearTimerRef.current = setTimeout(() => {
+      setEliminationAlert(null);
+      pushEliminationToCompanion(null);
+      eliminationShowingRef.current = false;
+      if (eliminationQueueRef.current.length > 0) {
+        playNextEliminationBanner();
+      }
+    }, 5500);
+  }, [pushEliminationToCompanion, setEliminationAlert]);
+
+  const buildTeamEliminationAlert = useCallback(
+    (teamIndex: number, placementRank: number, teamsSnapshot: Team[]): TeamEliminationAlert | null => {
+      const team = teamsSnapshot[teamIndex];
+      if (!team) return null;
+
+      const withAbbr = ensureTeamAbbreviation(team, projectPlayers);
+      const dbPlayers = projectPlayers.filter((p) => p.team === withAbbr.team);
+      const dbPlayer = dbPlayers[0];
+
+      return {
+        id: createEventId(),
+        teamIndex,
+        placementRank,
+        teamRank: withAbbr.rank,
+        teamLabel: getLeaderboardTeamLabel(withAbbr, projectPlayers),
+        teamName: withAbbr.team,
+        teamLogo: dbPlayer?.teamLogo?.trim() || withAbbr.teamLogo?.trim() || '',
+        country: dbPlayer?.country || withAbbr.country,
+        at: Date.now(),
+      };
+    },
+    [projectPlayers]
+  );
+
+  const queueTeamEliminationBanner = useCallback(
+    (teamIndex: number, placementRank: number, teamsSnapshot: Team[]) => {
+      const alert = buildTeamEliminationAlert(teamIndex, placementRank, teamsSnapshot);
+      if (!alert) return;
+
+      const dedupeKey = `${teamIndex}-${placementRank}`;
+      if (seenEliminationsRef.current.has(dedupeKey)) return;
+      seenEliminationsRef.current.add(dedupeKey);
+
+      eliminationQueueRef.current.push(alert);
+      playNextEliminationBanner();
+    },
+    [buildTeamEliminationAlert, playNextEliminationBanner]
+  );
+
+  const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
+  const elimBannerHoldPreviewPrevRef = useRef(false);
+
+  const clearPreviewEliminationState = useCallback(() => {
+    setEliminationAlert(null);
+    pushEliminationToCompanion(null);
+    if (eliminationClearTimerRef.current) {
+      clearTimeout(eliminationClearTimerRef.current);
+      eliminationClearTimerRef.current = null;
+    }
+  }, [pushEliminationToCompanion, setEliminationAlert]);
+
+  const setElimBannerHoldPreviewSafe = useCallback(
+    (on: boolean) => {
+      setElimBannerHoldPreview(on);
+      if (!on) clearPreviewEliminationState();
+    },
+    [clearPreviewEliminationState]
+  );
+
+  const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert | null => {
+    const teamIndex = teams.findIndex((t) => t.active && !t.status.every((s) => s === 0));
+    const idx = teamIndex >= 0 ? teamIndex : 0;
+    const alert = buildTeamEliminationAlert(idx, teams[idx]?.placementRank ?? 6, teams);
+    if (!alert) return null;
+    return { ...alert, id: STAGED_ELIM_PREVIEW_ALERT_ID, at: 0 };
+  }, [buildTeamEliminationAlert, teams]);
+
+  const stagedElimPreviewAlert = useMemo(
+    () => (elimBannerHoldPreview ? buildStagedElimPreviewAlert() : null),
+    [elimBannerHoldPreview, buildStagedElimPreviewAlert]
+  );
+
+  const displayElimAlert = elimBannerHoldPreview ? stagedElimPreviewAlert : eliminationAlert;
+  const elimBannerIsPanelsMode = visualConfig.elimBannerDesignMode !== 'full';
+  const elimBannerPanelSwitchLocked = elimBannerHoldPreview && !elimBannerIsPanelsMode;
+  const elimBannerCustomSwitchLocked = elimBannerHoldPreview && elimBannerIsPanelsMode;
+  const elimBannerCustomVariant = visualConfig.elimBannerCustomImageVariant ?? 'fullLink';
+  const elimBannerFullLinkSwitchLocked =
+    elimBannerHoldPreview && elimBannerCustomVariant !== 'fullLink';
+  const elimBannerPanelLinksSwitchLocked =
+    elimBannerHoldPreview && elimBannerCustomVariant === 'fullLink';
+  const elimBannerFullImageFit = visualConfig.elimBannerFullImageFit ?? 'contain';
+  const elimBannerContainFitSwitchLocked =
+    elimBannerHoldPreview && elimBannerFullImageFit !== 'contain';
+  const elimBannerCoverFitSwitchLocked =
+    elimBannerHoldPreview && elimBannerFullImageFit === 'contain';
+  const elimBannerDesignSwitchLockTitle =
+    'Matikan Preview Sementara untuk mengganti opsi ini';
+
+  const elimBannerPositionStyle = useMemo(
+    (): React.CSSProperties => ({
+      left: `calc(50% + ${elimBannerLayout.xOffset}px)`,
+      top: `${elimBannerLayout.yOffset}px`,
+      transform: `translateX(-50%) scale(${elimBannerLayout.scale / 100})`,
+      transformOrigin: 'top center',
+    }),
+    [elimBannerLayout.scale, elimBannerLayout.xOffset, elimBannerLayout.yOffset]
+  );
+
+  const patchElimBannerLayout = useCallback(
+    (patch: Partial<EliminationBannerLayout>) => {
+      setElimBannerLayout((prev) => ({ ...prev, ...patch }));
+    },
+    [setElimBannerLayout]
+  );
+
+  const previewEliminationBanner = useCallback(() => {
+    if (elimBannerHoldPreview) return;
+    const base = buildStagedElimPreviewAlert();
+    if (!base) return;
+    const alert = { ...base, id: createEventId() };
+    setEliminationAlert(alert);
+    pushEliminationToCompanion(alert);
+    if (eliminationClearTimerRef.current) {
+      clearTimeout(eliminationClearTimerRef.current);
+    }
+    eliminationClearTimerRef.current = setTimeout(() => {
+      setEliminationAlert(null);
+      pushEliminationToCompanion(null);
+    }, 4000);
+  }, [
+    buildStagedElimPreviewAlert,
+    elimBannerHoldPreview,
+    pushEliminationToCompanion,
+    setEliminationAlert,
+  ]);
+
+  useEffect(() => {
+    if (elimBannerHoldPreview) {
+      elimBannerHoldPreviewPrevRef.current = true;
+      if (eliminationClearTimerRef.current) {
+        clearTimeout(eliminationClearTimerRef.current);
+        eliminationClearTimerRef.current = null;
+      }
+      if (visualOnly) return;
+      const alert = buildStagedElimPreviewAlert();
+      if (alert) pushEliminationToCompanion(alert);
+      return;
+    }
+
+    if (elimBannerHoldPreviewPrevRef.current) {
+      elimBannerHoldPreviewPrevRef.current = false;
+      clearPreviewEliminationState();
+    }
+  }, [
+    elimBannerHoldPreview,
+    buildStagedElimPreviewAlert,
+    teams,
+    pushEliminationToCompanion,
+    visualOnly,
+    clearPreviewEliminationState,
+  ]);
+
+  useEffect(() => {
+    if (eliminationsInitializedRef.current) return;
+    teams.forEach((team, teamIndex) => {
+      if (team.placementRank !== null && team.status.every((s) => s === 0)) {
+        seenEliminationsRef.current.add(`${teamIndex}-${team.placementRank}`);
+      }
+    });
+    eliminationsInitializedRef.current = true;
+  }, [teams]);
 
   const handleApplyScoring = (newRules: number[], newKillPoints: number) => {
     setScoringRules(newRules);
@@ -452,9 +1031,224 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     setIsScoringModalOpen(false);
   };
 
-  const handleApplyTieBreaker = (newOrder: TieBreakerCriteria[]) => {
-    setTieBreakerOrder(newOrder);
+  const handleApplyTieBreaker = (config: TieBreakerConfig) => {
+    setTieBreakerOrder(config.order);
+    setMatchKillRulesByMatch((prev) => ({
+      ...prev,
+      [String(currentMatch)]: config.matchKillRules,
+    }));
     setIsTieBreakerModalOpen(false);
+  };
+
+  const pushKillEvent = (event: KillFeedEvent | null) => {
+    if (!event) return;
+    setKillEventLog((prev) => [...prev, event]);
+  };
+
+  const handleEliminationAfterAction = (
+    teamIndex: number,
+    eliminatedRank: number | null,
+    nextTeams: Team[]
+  ): Team[] => {
+    const swept = finalizeTeamAtIndex(nextTeams, teamIndex);
+    const prevRank = nextTeams[teamIndex]?.placementRank ?? null;
+    const rankAfter = swept[teamIndex]?.placementRank ?? null;
+
+    if (eliminatedRank !== null) {
+      queueTeamEliminationBanner(teamIndex, eliminatedRank, swept);
+    } else if (rankAfter !== null && rankAfter !== prevRank) {
+      queueTeamEliminationBanner(teamIndex, rankAfter, swept);
+    }
+
+    const assignedCount = swept.filter((t) => t.placementRank !== null).length;
+    setNextPlacementRank(16 - assignedCount);
+    return cloneLeaderboardTeams(swept);
+  };
+
+  const pushCompanionTeamsNow = useCallback(
+    (teamsSnapshot: Team[]) => {
+      if (visualOnly) return;
+      notifyCompanionData({
+        assetId: asset.id,
+        data: {
+          BROHUBS_LEADERBOARD_TEAMS: teamsSnapshot.map((team) =>
+            ensureTeamAbbreviation(team, projectPlayers)
+          ),
+        },
+      });
+    },
+    [asset.id, visualOnly, projectPlayers]
+  );
+
+  const commitKillAction = (
+    affectedTeamIndex: number,
+    run: (prev: Team[]) => {
+      teams: Team[];
+      event: KillFeedEvent | null;
+      eliminatedRank: number | null;
+    }
+  ) => {
+    let eventToPush: KillFeedEvent | null = null;
+    setTeams((prev) => {
+      if (isTeamEliminationSealed(prev[affectedTeamIndex])) return prev;
+      const { teams: nextTeams, event, eliminatedRank } = run(prev);
+      eventToPush = event;
+      if (!event && eliminatedRank === null) return prev;
+      const result = handleEliminationAfterAction(affectedTeamIndex, eliminatedRank, nextTeams);
+      pushCompanionTeamsNow(result);
+      return result;
+    });
+    if (eventToPush) pushKillEvent(eventToPush);
+  };
+
+  const handleKnock = (teamIndex: number, playerIndex: number) => {
+    const team = teams[teamIndex];
+    if (!team || isTeamEliminationSealed(team)) return;
+    const current = getPlayerStatus(team, playerIndex);
+    if (current === 1) {
+      setKnockAttackerModalVictim({ teamIndex, playerIndex });
+      return;
+    }
+    const victim: PlayerRef = { teamIndex, playerIndex };
+    commitKillAction(teamIndex, (prev) => applyKnockAction(prev, victim, matchKillRules));
+  };
+
+  const closeKnockAttackerModal = () => setKnockAttackerModalVictim(null);
+
+  const confirmKnockWithAttacker = (knocker: PlayerRef | null) => {
+    if (!knockAttackerModalVictim) return;
+    const { teamIndex, playerIndex } = knockAttackerModalVictim;
+    const victim: PlayerRef = { teamIndex, playerIndex };
+    commitKillAction(teamIndex, (prev) =>
+      applyKnockAction(prev, victim, matchKillRules, knocker)
+    );
+    closeKnockAttackerModal();
+  };
+
+  const handleElimButton = (teamIndex: number, playerIndex: number) => {
+    const team = teams[teamIndex];
+    if (!team || isTeamEliminationSealed(team)) return;
+    const current = getPlayerStatus(team, playerIndex);
+    if (current === 0) {
+      if (team.placementRank !== null) {
+        window.alert('Tim ini sudah eliminasi (placement terkunci). Tidak bisa revive.');
+        return;
+      }
+      const victim: PlayerRef = { teamIndex, playerIndex };
+      commitKillAction(teamIndex, (prev) => applyKnockAction(prev, victim, matchKillRules));
+      return;
+    }
+    setElimModalVictim({ teamIndex, playerIndex });
+  };
+
+  const closeElimModal = () => setElimModalVictim(null);
+
+  const confirmElimFromModal = (finisher: PlayerRef | null) => {
+    if (!elimModalVictim) return;
+    const { teamIndex, playerIndex } = elimModalVictim;
+    const victim: PlayerRef = { teamIndex, playerIndex };
+
+    if (finisher === null) {
+      commitKillAction(teamIndex, (prev) => applyManualElimAction(prev, victim));
+    } else {
+      let blocked = false;
+      commitKillAction(teamIndex, (prev) => {
+        const result = applyFinishAction(prev, finisher, victim);
+        if (!result.event) blocked = true;
+        return result;
+      });
+      if (blocked) {
+        window.alert('Tidak bisa mencatat kill musuh untuk pemain ini.');
+        return;
+      }
+    }
+    closeElimModal();
+  };
+
+  const openKillVictimModal = (teamIndex: number, playerIndex: number) => {
+    const team = teams[teamIndex];
+    if (!team || getPlayerStatus(team, playerIndex) !== 1) return;
+    setKillVictimModalFinisher({ teamIndex, playerIndex });
+  };
+
+  const closeKillVictimModal = () => setKillVictimModalFinisher(null);
+
+  const confirmKillVictim = (victim: PlayerRef) => {
+    if (!killVictimModalFinisher) return;
+    const finisher = killVictimModalFinisher;
+    let blocked = false;
+    commitKillAction(victim.teamIndex, (prev) => {
+      const result = applyFinishAction(prev, finisher, victim);
+      if (!result.event) blocked = true;
+      return result;
+    });
+    if (blocked) {
+      window.alert('Tidak bisa mencatat kill. Pastikan korban belum Dead.');
+      return;
+    }
+    closeKillVictimModal();
+  };
+
+  const syncPlacementMetaAfterUndo = useCallback(
+    (snapshot: Team[], revivedTeamIndex?: number, removedPlacementRank?: number) => {
+      const assignedCount = snapshot.filter((t) => t.placementRank !== null).length;
+      setNextPlacementRank(16 - assignedCount);
+      if (revivedTeamIndex !== undefined && removedPlacementRank != null) {
+        seenEliminationsRef.current.delete(`${revivedTeamIndex}-${removedPlacementRank}`);
+      }
+      pushCompanionTeamsNow(snapshot);
+    },
+    [pushCompanionTeamsNow]
+  );
+
+  const applyUndoKillEvent = (event: KillFeedEvent, teamIndex: number) => {
+    setTeams((prev) => {
+      const removedRank = prev[teamIndex]?.placementRank ?? null;
+      const undone = undoKillFeedEvent(prev, event, matchKillRules);
+      const next = cloneLeaderboardTeams(undone.teams);
+      syncPlacementMetaAfterUndo(next, teamIndex, removedRank);
+      return next;
+    });
+  };
+
+  const handleUndoLastKill = () => {
+    if (killEventLog.length === 0) {
+      window.alert('Tidak ada aksi terakhir untuk dibatalkan.');
+      return;
+    }
+    const last = killEventLog[killEventLog.length - 1];
+    const team = teams[last.victim.teamIndex];
+    if (
+      !window.confirm(
+        `UNDO aksi terakhir${team ? ` (${team.team})` : ''}?\n\nKnock, kill, dan placement dari aksi itu dikembalikan.`
+      )
+    ) {
+      return;
+    }
+    applyUndoKillEvent(last, last.victim.teamIndex);
+    setKillEventLog((prev) => prev.slice(0, -1));
+  };
+
+  const handleUndoTeam = (teamIndex: number) => {
+    const team = teams[teamIndex];
+    if (!team) return;
+
+    const eventIndex = findLastKillEventIndexForTeam(killEventLog, teamIndex);
+    if (eventIndex < 0) {
+      window.alert(`Belum ada aksi knock/kill/eliminasi tercatat untuk ${team.team}.`);
+      return;
+    }
+
+    const event = killEventLog[eventIndex];
+    const newerCount = killEventLog.length - 1 - eventIndex;
+    let message = `UNDO ${team.team}?\n\nMembatalkan aksi terakhir tim ini (status, kill, placement).`;
+    if (newerCount > 0) {
+      message += `\n\nPerhatian: ada ${newerCount} aksi tim lain setelahnya. Disarankan pakai UNDO global dulu; lanjut tetap membatalkan aksi tim ini saja.`;
+    }
+    if (!window.confirm(message)) return;
+
+    applyUndoKillEvent(event, teamIndex);
+    setKillEventLog((prev) => [...prev.slice(0, eventIndex), ...prev.slice(eventIndex + 1)]);
   };
 
   const [fraggers, setFraggers] = useSharedState('BROHUBS_TOPFRAGGERS_DATA', [
@@ -465,22 +1259,33 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       { rank: 5, name: 'PLAYER 5', team: 'TEAM E', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
   ]);
 
-  // Push team / player / layout data to OBS output links (debounced)
   useEffect(() => {
     if (visualOnly) return;
+    if (!isMatchReadyForTopFraggerSync(teams)) return;
+    setFraggers(buildTopFraggersFromMatch(teams, projectPlayers, 5));
+  }, [teams, projectPlayers, aliveCount, currentMatch, setFraggers, visualOnly]);
+
+  // Push team / layout / visual ke OBS (debounce — ringan saat Preview Sementara agar tidak glitch)
+  useEffect(() => {
+    if (visualOnly) return;
+    const delay = elimBannerHoldPreview ? 80 : 400;
     const timer = setTimeout(() => {
       notifyCompanionData({
         assetId: asset.id,
         data: {
-          BROHUBS_LEADERBOARD_TEAMS: teams.map((team) => ensureTeamAbbreviation(team, projectPlayers)),
+          BROHUBS_LEADERBOARD_TEAMS: teamsRef.current.map((team) =>
+            ensureTeamAbbreviation(team, projectPlayers)
+          ),
           BROHUBS_LEADERBOARD_TITLE: matchTitle,
           BROHUBS_LEADERBOARD_MATCH: currentMatch,
           BROHUBS_LEADERBOARD_VISUAL: visualConfig,
           BROHUBS_LEADERBOARD_LAYOUT: layoutConfig,
+          BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
+          BROHUBS_LEADERBOARD_MATCH_KILL_RULES: matchKillRulesByMatch,
           BROHUBS_TOPFRAGGERS_DATA: fraggers,
         },
       });
-    }, 400);
+    }, delay);
     return () => clearTimeout(timer);
   }, [
     asset.id,
@@ -489,9 +1294,42 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     currentMatch,
     visualConfig,
     layoutConfig,
+    elimBannerLayout,
+    matchKillRulesByMatch,
     fraggers,
     visualOnly,
+    elimBannerHoldPreview,
+    projectPlayers,
   ]);
+
+  const handleResetCurrentMatch = () => {
+    if (currentMatch <= 1) return;
+    const ok = window.confirm(
+      `RESET MATCH ${currentMatch}?\n\n` +
+        'Hanya data match ini yang diulang: kill, status pemain, placement, dan log kill.\n' +
+        'Poin overall / WWCD / placement dari match sebelumnya TIDAK diubah.\n\n' +
+        'Lanjutkan?'
+    );
+    if (!ok) return;
+
+    setTeams(resetCurrentMatchTeamState(teams));
+    setNextPlacementRank(16);
+    setActivePopups([]);
+    setKillEventLog([]);
+    setEliminationAlert(null);
+    seenEliminationsRef.current.clear();
+    eliminationQueueRef.current = [];
+    eliminationShowingRef.current = false;
+    if (!visualOnly) {
+      setFraggers([
+        { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+        { rank: 2, name: 'PLAYER 2', team: 'TEAM B', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+        { rank: 3, name: 'PLAYER 3', team: 'TEAM C', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+        { rank: 4, name: 'PLAYER 4', team: 'TEAM D', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+        { rank: 5, name: 'PLAYER 5', team: 'TEAM E', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
+      ]);
+    }
+  };
 
   const handleResetAll = () => {
     if (window.confirm("RESET SELURUH DATA (POIN, KILL, DAN STATUS)?")) {
@@ -501,12 +1339,19 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           totalPlacementPoints: 0, 
           totalWwcds: 0,
           playerKills: [0, 0, 0, 0],
+          playerFinishCredit: [null, null, null, null],
+          playerKnockCredit: [null, null, null, null],
           status: [1, 1, 1, 1],
           placementRank: null
         })));
         setCurrentMatch(1);
         setNextPlacementRank(16);
         setActivePopups([]);
+        setKillEventLog([]);
+        setEliminationAlert(null);
+        seenEliminationsRef.current.clear();
+        eliminationQueueRef.current = [];
+        eliminationShowingRef.current = false;
         setFraggers([
           { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
           { rank: 2, name: 'PLAYER 2', team: 'TEAM B', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
@@ -518,24 +1363,23 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   };
 
   const startNewMatch = (targetMatch: number) => {
-    const updatedTeams = teams.map((t) => {
-        let pRank = t.placementRank;
-        if (t.active && pRank === null) {
-            pRank = 1; 
-        }
-
+    const withPlacements = applyMatchEndPlacementRanks(teams);
+    const updatedTeams = withPlacements.map((t) => {
+        const pRank = t.placementRank;
         const placementPoints = pRank ? (scoringRules[pRank - 1] || 0) : 0;
         const currentKills = t.playerKills.reduce((a, b) => a + b, 0);
         const killPoints = currentKills * killPointValue;
-        
+
         return {
             ...t,
-            points: t.points + placementPoints + killPoints, 
-            totalPlacementPoints: t.totalPlacementPoints + placementPoints, 
-            totalWwcds: t.totalWwcds + (pRank === 1 ? 1 : 0), 
-            playerKills: [0, 0, 0, 0], 
-            status: [1, 1, 1, 1], 
-            placementRank: null
+            points: t.points + placementPoints + killPoints,
+            totalPlacementPoints: t.totalPlacementPoints + placementPoints,
+            totalWwcds: t.totalWwcds + (pRank === 1 ? 1 : 0),
+            playerKills: [0, 0, 0, 0],
+            playerFinishCredit: [null, null, null, null],
+            playerKnockCredit: [null, null, null, null],
+            status: [1, 1, 1, 1],
+            placementRank: null,
         };
     });
 
@@ -543,69 +1387,16 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     setCurrentMatch(targetMatch);
     setNextPlacementRank(16);
     setActivePopups([]);
+    setKillEventLog([]);
+    setEliminationAlert(null);
+    seenEliminationsRef.current.clear();
+    eliminationQueueRef.current = [];
+    eliminationShowingRef.current = false;
   };
 
   const confirmEndMatchExecution = () => {
     startNewMatch(currentMatch + 1);
     setIsEndMatchModalOpen(false);
-  };
-
-  const setPlayerStatus = (teamIndex: number, playerIndex: number, status: number) => {
-    const teamBefore = teams[teamIndex];
-    if (!teamBefore) return;
-
-    const newTeams = teams.map((t, idx) => {
-        if (idx !== teamIndex) return t;
-        const updatedTeam = { ...t };
-        const current = updatedTeam.status[playerIndex];
-        const updatedStatus = [...updatedTeam.status];
-        
-        // Toggle: if the same status is clicked, revert to 1 (Alive), else set to status
-        const targetStatus = current === status ? 1 : status;
-        updatedStatus[playerIndex] = targetStatus;
-        
-        // Critical rule: if there are no ALIVE (1) players left in this team,
-        // then all KNOCKED (2) players automatically become DEAD (0), which means the team is fully eliminated ([0,0,0,0])!
-        if (!updatedStatus.includes(1)) {
-            for (let i = 0; i < updatedStatus.length; i++) {
-                if (updatedStatus[i] === 2) {
-                    updatedStatus[i] = 0;
-                }
-            }
-        }
-        
-        updatedTeam.status = updatedStatus as [number, number, number, number];
-        return updatedTeam;
-    });
-
-    const teamAfter = newTeams[teamIndex];
-    const wasEliminated = teamBefore.status.every(s => s === 0);
-    const isEliminated = teamAfter.status.every(s => s === 0);
-
-    if (isEliminated && !wasEliminated) {
-        const assignedRanks = newTeams
-            .filter((_, idx) => idx !== teamIndex)
-            .map(t => t.placementRank)
-            .filter(r => r !== null) as number[];
-        
-        const nextRank = newTeams.length - assignedRanks.length;
-        teamAfter.placementRank = nextRank;
-        
-        setNextPlacementRank(16 - (assignedRanks.length + 1));
-        showEliminationPopup(teamAfter.rank);
-    } else if (!isEliminated && wasEliminated) {
-        if (teamAfter.placementRank !== null) {
-            teamAfter.placementRank = null;
-            const assignedRanks = newTeams
-                .filter((_, idx) => idx !== teamIndex)
-                .map(t => t.placementRank)
-                .filter(r => r !== null) as number[];
-            
-            setNextPlacementRank(16 - assignedRanks.length);
-        }
-    }
-
-    setTeams(newTeams);
   };
 
   const updatePlayerKills = (teamIndex: number, playerIndex: number, delta: number) => {
@@ -842,37 +1633,99 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     }
   };
 
-  const livePreviewContent = useMemo(() => (
-    <motion.div 
-      {...getAssetAnimationVariants()}
-      style={style}
-      className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden font-sans select-none ${style?.position === 'absolute' ? '' : 'mx-auto'}`}
-    >
-       {/* Checkerboard Background for Transparency Visualization */}
-       {!visualOnly && (
-         <div className="absolute inset-0 opacity-40" style={{ 
-             backgroundImage: 'conic-gradient(#0a0a0a 90deg, #050505 90deg 180deg, #0a0a0a 180deg 270deg, #050505 270deg)',
-             backgroundSize: '40px 40px' 
-         }} />
-       )}
-       
-       {showOverlay && (
+  const leaderboardOverlayPanel = useMemo(() => {
+    if (!showOverlay) return null;
+
+    const showElimsColumn =
+      currentMatch > 1 &&
+      sortedPreviewTeams.some((team) => team.playerKills.reduce((sum, kills) => sum + kills, 0) > 0);
+
+    const panelHasBgImage = hasLeaderboardBgImage(
+      visualConfig.leaderboardPanelBgImage,
+      visualConfig
+    );
+
+    return (
          <div 
-           className="absolute right-0 top-0 bottom-0 w-[420px] flex flex-col justify-center py-12 origin-right"
+           className="absolute right-0 flex flex-col justify-start origin-right max-w-full"
            style={{ 
+             width: `${leaderboardPanelWidth}px`,
              right: `${-layoutConfig.xOffset}px`,
              top: `${layoutConfig.yOffset}px`,
-             transformOrigin: 'right center',
-             scale: layoutConfig.scale / 100
+             transformOrigin: 'right top',
+             scale: layoutConfig.scale / 100,
+             fontFamily: leaderboardFontFamily,
+             transition: LEADERBOARD_PANEL_WIDTH_TRANSITION,
            }}
          >
-              <div className="rounded-t-xl text-center py-4 shadow-2xl relative z-20 border-b-2 border-black/10 shrink-0" style={{ backgroundColor: visualConfig.headerBg }}>
+           <div className="relative flex flex-col rounded-xl shadow-2xl min-h-0">
+             {panelHasBgImage && (
+               <div
+                 className="absolute inset-0 z-0 pointer-events-none rounded-xl overflow-hidden"
+                 style={resolveLeaderboardSurfaceStyle(
+                   visualConfig.headerBg,
+                   visualConfig.leaderboardPanelBgImage,
+                   visualConfig
+                 )}
+               />
+             )}
+              <div
+                className="rounded-t-xl text-center py-4 shadow-2xl relative z-20 border-b-2 border-black/10 shrink-0"
+                style={resolveLeaderboardSurfaceStyle(
+                  visualConfig.headerBg,
+                  visualConfig.headerBgImage,
+                  visualConfig
+                )}
+              >
                  <h2 className="text-3xl tracking-widest uppercase font-[900] drop-shadow-md" style={{ color: visualConfig.headerText }}>{matchTitle}</h2>
-                 <div className="flex justify-between px-8 text-[11px] uppercase font-bold mt-2 opacity-90 tracking-wider" style={{ color: visualConfig.headerText }}>
-                    <span className="w-12 text-left">Rank</span>
-                    <span className="flex-1 text-left">Team</span>
-                    <span className={`w-20 text-center transition-transform ${visualConfig.showFlags ? 'translate-x-5' : ''}`}>Status</span>
-                    <span className="w-20 text-right">Pts</span>
+                 <div
+                   className="flex items-center justify-between px-6 text-[11px] uppercase font-bold mt-2 opacity-90 tracking-wider"
+                   style={{ color: visualConfig.headerText }}
+                 >
+                    <div className="flex items-center gap-4 flex-1 min-w-0 mr-2 pr-1">
+                      <span className="w-8 text-center shrink-0">Rank</span>
+                      <div
+                        style={{
+                          width: visualConfig.showFlags
+                            ? `${layoutConfig.flagWidth}px`
+                            : 0,
+                          opacity: visualConfig.showFlags ? 1 : 0,
+                          transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
+                        }}
+                        className="shrink-0 overflow-hidden"
+                        aria-hidden
+                      />
+                      <div className="flex items-center flex-1 min-w-0">
+                        <div
+                          style={{ width: `${layoutConfig.logoSize}px` }}
+                          className="shrink-0"
+                          aria-hidden
+                        />
+                        <div className="w-4 shrink-0 flex items-center justify-center">
+                          <span className="whitespace-nowrap leading-none">Team</span>
+                        </div>
+                        <div className="flex-1 min-w-0" aria-hidden />
+                      </div>
+                    </div>
+                    <div
+                      className="flex items-center shrink-0 gap-2"
+                      style={{
+                        marginRight: visualConfig.showFlags ? -4 : 0,
+                        transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
+                      }}
+                    >
+                      <span className={`text-center shrink-0 ${showElimsColumn ? 'w-16' : 'w-20'}`}>
+                        Status
+                      </span>
+                      <span className={`text-right shrink-0 ${showElimsColumn ? 'w-12' : 'w-20'}`}>
+                        Pts
+                      </span>
+                      {showElimsColumn && (
+                        <span className="w-9 text-center shrink-0 translate-x-3 animate-in fade-in duration-300">
+                          Elims
+                        </span>
+                      )}
+                    </div>
                  </div>
               </div>
 
@@ -881,12 +1734,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                 style={{ height: `${sortedPreviewTeams.length * layoutConfig.rowHeight}px` }}
               >
                  {sortedPreviewTeams.map((t, idx) => {
-                    const isTeamEliminated = t.status.every(s => s === 0);
+                    const isTeamEliminated = isTeamMatchEliminated(t);
                     const showPopup = activePopups.includes(t.rank);
-                    const isWinner = aliveCount === 1 && !isTeamEliminated;
+                    const isWinner =
+                      t.placementRank === 1 ||
+                      (contentionCount === 1 && teamHasAlivePlayer(t));
                     const currentKills = t.playerKills.reduce((a, b) => a + b, 0);
                     const liveKillPoints = currentKills * killPointValue;
-
                     const displayedPts = t.points + liveKillPoints;
 
                     return (
@@ -902,11 +1756,23 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                       variants={rowVariants}
                       className="absolute top-0 left-0 w-full flex items-center justify-between px-6 border-b border-white/5 overflow-hidden"
                       style={{ 
-                          backgroundColor: isWinner 
-                            ? visualConfig.winnerBg 
-                            : (isTeamEliminated 
-                                ? visualConfig.eliminatedBg 
-                                : (idx % 2 === 0 ? visualConfig.rowEvenBg : visualConfig.rowOddBg)),
+                          ...resolveLeaderboardSurfaceStyle(
+                            isWinner
+                              ? visualConfig.winnerBg
+                              : isTeamEliminated
+                                ? visualConfig.eliminatedBg
+                                : idx % 2 === 0
+                                  ? visualConfig.rowEvenBg
+                                  : visualConfig.rowOddBg,
+                            isWinner
+                              ? visualConfig.winnerBgImage
+                              : isTeamEliminated
+                                ? visualConfig.eliminatedBgImage
+                                : idx % 2 === 0
+                                  ? visualConfig.rowEvenBgImage
+                                  : visualConfig.rowOddBgImage,
+                            visualConfig
+                          ),
                           height: `${layoutConfig.rowHeight}px`,
                           transform: `translateY(${idx * layoutConfig.rowHeight}px)`,
                           transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.6s ease', 
@@ -937,22 +1803,33 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                            </div>
                        )}
 
-                       <div className={`flex items-center gap-4 flex-1 min-w-0 mr-4 transition-opacity duration-500 relative z-10 ${isTeamEliminated ? 'opacity-40 grayscale' : 'opacity-100'}`}>
+                       <div className={`flex items-center gap-4 flex-1 min-w-0 mr-2 pr-1 transition-opacity duration-500 relative z-10 ${isTeamEliminated ? 'opacity-40 grayscale' : 'opacity-100'}`}>
                           <span className="font-[900] text-xl w-8 text-center" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.rankColor }}>#{idx + 1}</span>
                           
-                          {/* FLAG RENDERING */}
-                          {visualConfig.showFlags && t.country && (
-                            <div 
-                              style={{ width: `${layoutConfig.flagWidth}px` }} 
-                              className="shrink-0 flex items-center justify-center shadow-sm"
-                            >
-                                <img 
-                                    src={`https://flagcdn.com/w80/${t.country.toLowerCase()}.png`} 
-                                    alt={t.country}
-                                    className="w-full h-auto rounded-[2px]"
-                                />
-                            </div>
-                          )}
+                          <div
+                            style={{
+                              width:
+                                visualConfig.showFlags && t.country
+                                  ? `${layoutConfig.flagWidth}px`
+                                  : 0,
+                              opacity: visualConfig.showFlags && t.country ? 1 : 0,
+                              transform:
+                                visualConfig.showFlags && t.country
+                                  ? 'scale(1)'
+                                  : 'scale(0.92)',
+                              transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
+                            }}
+                            className="shrink-0 flex items-center justify-center shadow-sm overflow-hidden"
+                            aria-hidden={!visualConfig.showFlags || !t.country}
+                          >
+                            {t.country ? (
+                              <img
+                                src={`https://flagcdn.com/w80/${t.country.toLowerCase()}.png`}
+                                alt={t.country}
+                                className="w-full h-auto rounded-[2px]"
+                              />
+                            ) : null}
+                          </div>
 
                           <div style={{ width: `${layoutConfig.logoSize}px`, height: `${layoutConfig.logoSize}px` }} className="shrink-0 flex items-center justify-center overflow-hidden">
                             {t.teamLogo ? <img src={t.teamLogo} className="w-full h-full object-contain" /> : <Shield size={layoutConfig.logoSize - 8} className="opacity-20 text-black" />}
@@ -962,24 +1839,36 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                           </div>
                        </div>
 
-                       <div className={`flex flex-col items-center ${visualConfig.showFlags ? '-mr-[18px]' : 'mr-3'} shrink-0 transition-opacity relative z-10 ${isTeamEliminated ? 'opacity-20' : 'opacity-100'}`}>
-                          <div className="flex gap-1.5">
-                              {t.status.map((s, i) => (
-                                <div key={i} className="w-3.5 h-7 rounded-full border shadow-sm transition-colors flex items-center justify-center" style={{ backgroundColor: getStatusColor(s), borderColor: `${visualConfig.statusBorder}20` }}>
-                                    <span className="text-[5px] font-black opacity-50 mix-blend-overlay" style={{ color: visualConfig.statusText }}>{t.playerNames[i]?.charAt(0)}</span>
-                                </div>
-                              ))}
-                          </div>
-                       </div>
+                       <div
+                         className={`flex items-center shrink-0 gap-2 relative z-10 ${isTeamEliminated ? 'opacity-20' : 'opacity-100'}`}
+                         style={{
+                           marginRight: visualConfig.showFlags ? -4 : 0,
+                           transition: LEADERBOARD_FLAG_LAYOUT_TRANSITION,
+                         }}
+                       >
+                         <div className="flex flex-col items-center shrink-0">
+                            <div className="flex gap-1.5">
+                                {t.status.map((s, i) => (
+                                  <div key={i} className="w-3.5 h-7 rounded-full border shadow-sm transition-colors flex items-center justify-center" style={{ backgroundColor: getStatusColor(s), borderColor: `${visualConfig.statusBorder}20` }}>
+                                      <span className="text-[5px] font-black opacity-50 mix-blend-overlay" style={{ color: visualConfig.statusText }}>{t.playerNames[i]?.charAt(0)}</span>
+                                  </div>
+                                ))}
+                            </div>
+                         </div>
 
-                       <div className={`w-20 text-right flex items-center justify-end gap-2 shrink-0 transition-opacity relative z-10 ${isTeamEliminated ? 'opacity-50' : 'opacity-100'}`}>
-                          <span className="font-[900] text-2xl leading-none" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.pointsColor }}>{displayedPts}</span>
-                          
-                          {currentMatch > 1 && liveKillPoints > 0 && (
-                            <span className="font-black text-sm tracking-tight" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.deltaPointsColor }}>
-                                + {liveKillPoints}
-                            </span>
-                          )}
+                         <div className={`text-right flex items-center justify-end shrink-0 ${showElimsColumn ? 'w-12' : 'w-20'}`}>
+                            <span className="font-[900] text-2xl leading-none" style={{ color: isWinner ? visualConfig.winnerText : visualConfig.pointsColor }}>{displayedPts}</span>
+                         </div>
+
+                         {showElimsColumn && (
+                           <div className="w-9 shrink-0 flex items-center justify-center translate-x-1">
+                              <span
+                                className={`font-black text-sm tracking-tight leading-none tabular-nums text-black ${currentKills > 0 ? 'animate-in fade-in duration-300' : ''}`}
+                              >
+                                {currentKills}
+                              </span>
+                           </div>
+                         )}
                        </div>
                     </motion.div>
                  );
@@ -995,7 +1884,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                 }}
                 variants={bottomBoxVariants}
                 className="rounded-b-xl px-6 py-4 flex justify-center gap-8 shadow-2xl mt-0.5 border-t-2 border-black/10 relative z-20 shrink-0" 
-                style={{ backgroundColor: visualConfig.headerBg }}
+                style={resolveLeaderboardSurfaceStyle(
+                  visualConfig.headerBg,
+                  visualConfig.headerBgImage,
+                  visualConfig
+                )}
               >
                  <div className="flex items-center gap-2">
                     <div className="w-3.5 h-3.5 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: visualConfig.statusAlive }} />
@@ -1011,9 +1904,67 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                  </div>
               </motion.div>
            </div>
-         )}
-    </motion.div>
-  ), [showOverlay, getAssetAnimationVariants, layoutConfig, visualConfig, matchTitle, sortedPreviewTeams, activePopups, aliveCount, killPointValue, effectiveAnimationConfig, getStatusColor, currentMatch, rowVariants, bottomBoxVariants, projectPlayers, visualOnly, style]);
+           </div>
+    );
+  }, [
+    showOverlay,
+    layoutConfig,
+    leaderboardPanelWidth,
+    visualConfig,
+    leaderboardFontFamily,
+    matchTitle,
+    sortedPreviewTeams,
+    activePopups,
+    aliveCount,
+    killPointValue,
+    effectiveAnimationConfig,
+    getStatusColor,
+    currentMatch,
+    rowVariants,
+    bottomBoxVariants,
+    projectPlayers,
+  ]);
+
+  const livePreviewContent = useMemo(
+    () => (
+      <motion.div
+        {...getAssetAnimationVariants()}
+        style={style}
+        className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden font-sans select-none ${style?.position === 'absolute' ? '' : 'mx-auto'}`}
+      >
+        {!visualOnly && (
+          <div
+            className="absolute inset-0 opacity-40"
+            style={{
+              backgroundImage:
+                'conic-gradient(#0a0a0a 90deg, #050505 90deg 180deg, #0a0a0a 180deg 270deg, #050505 270deg)',
+              backgroundSize: '40px 40px',
+            }}
+          />
+        )}
+
+        <div className="absolute z-[500] pointer-events-none" style={elimBannerPositionStyle}>
+          <TeamEliminatedBanner
+            alert={displayElimAlert}
+            visual={elimBannerVisual}
+            tuningPreview={elimBannerHoldPreview}
+          />
+        </div>
+
+        {leaderboardOverlayPanel}
+      </motion.div>
+    ),
+    [
+      getAssetAnimationVariants,
+      style,
+      visualOnly,
+      elimBannerPositionStyle,
+      displayElimAlert,
+      elimBannerVisual,
+      elimBannerHoldPreview,
+      leaderboardOverlayPanel,
+    ]
+  );
 
   // Sync preview content to parent
   useEffect(() => {
@@ -1115,7 +2066,18 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
             <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar relative z-10">
                 <div className="max-w-5xl mx-auto space-y-6">
                     <div className="flex bg-zinc-950 p-0.5 rounded-xl border border-white/5 border-l-[3px] border-l-[#ccff00]/40 shadow-2xl mb-8">
-                        {['DATA', 'VISUAL', 'ANIMATION'].map(tab => (<button key={tab} onClick={() => setConfigTab(tab as any)} className={`flex-1 py-1.5 text-[8px] font-black tracking-widest uppercase rounded-lg transition-all ${configTab === tab ? 'bg-[#ccff00] text-black' : 'text-zinc-600 hover:text-white'}`}>{tab} INPUT</button>))}
+                        {['DATA', 'VISUAL', 'ANIMATION'].map(tab => (
+                          <button
+                            key={tab}
+                            onClick={() => {
+                              setConfigTab(tab as 'DATA' | 'VISUAL' | 'ANIMATION');
+                              if (tab === 'VISUAL') setVisualSettingsPanel('choose');
+                            }}
+                            className={`flex-1 py-1.5 text-[8px] font-black tracking-widest uppercase rounded-lg transition-all ${configTab === tab ? 'bg-[#ccff00] text-black' : 'text-zinc-600 hover:text-white'}`}
+                          >
+                            {tab} INPUT
+                          </button>
+                        ))}
                     </div>
 
                     {configTab === 'DATA' && (
@@ -1144,7 +2106,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                         <h3 className="text-[8px] font-black text-zinc-500 tracking-[0.2em] uppercase">MATCH SEQUENCE</h3>
                                     </div>
                                     <div className="flex items-center bg-black/40 border border-white/5 rounded-xl p-0.5 w-full h-10">
-                                        <button onClick={() => aliveCount <= 1 && setCurrentMatch(Math.max(1, currentMatch - 1))} className={`w-8 h-full flex items-center justify-center transition-all ${aliveCount > 1 ? 'text-zinc-800 cursor-not-allowed opacity-50' : 'text-zinc-600 hover:text-white'}`}><Minus size={14} /></button>
+                                        <button onClick={() => contentionCount <= 1 && setCurrentMatch(Math.max(1, currentMatch - 1))} className={`w-8 h-full flex items-center justify-center transition-all ${contentionCount > 1 ? 'text-zinc-800 cursor-not-allowed opacity-50' : 'text-zinc-600 hover:text-white'}`}><Minus size={14} /></button>
                                         <div className="flex-1 flex flex-col items-center justify-center border-x border-white/5 h-full">
                                             <span className="text-[5px] font-black text-zinc-600 uppercase tracking-widest leading-none mb-0.5">GAME</span>
                                             <span className="text-base font-black text-[#ccff00] leading-none">{currentMatch}</span>
@@ -1164,7 +2126,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     `}>
                                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${isMatchReadyToEnd ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'}`} />
                                         <span className="text-[8px] font-black uppercase tracking-widest whitespace-nowrap">
-                                            {isMatchReadyToEnd ? 'READY: WINNER FOUND' : `LIVE: ${aliveCount} TEAMS LEFT`}
+                                            {contentionCount === 0
+                                              ? 'READY: MATCH SELESAI'
+                                              : contentionCount === 1
+                                                ? 'READY: WINNER FOUND'
+                                                : contentionCount === 2
+                                                  ? 'READY: TOP 2 — LANJUT MATCH'
+                                                  : `LIVE: ${contentionCount} TIM TANPA PLACEMENT`}
                                         </span>
                                     </div>
                                     <button 
@@ -1183,8 +2151,32 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     <button onClick={() => setIsTieBreakerModalOpen(true)} className="h-11 bg-[#1a1c0e] border border-[#ccff00]/20 hover:border-[#ccff00]/50 text-[#ccff00] rounded-xl font-black text-[9px] tracking-[0.2em] uppercase flex items-center justify-center gap-2.5 transition-all active:scale-95">
                                         <ListOrdered size={14} /> TIE-BREAKER
                                     </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleUndoLastKill}
+                                      title="Batalkan 1 aksi terakhir di seluruh match (semua tim)"
+                                      className="h-11 bg-zinc-900 border border-white/10 hover:border-orange-500/40 text-zinc-400 hover:text-orange-400 rounded-xl font-black text-[9px] tracking-[0.2em] uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
+                                    >
+                                        <Undo2 size={14} /> UNDO LAST
+                                    </button>
                                 </div>
 
+                                {currentMatch > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={handleResetCurrentMatch}
+                                    className="bg-[#1a1a1d] hover:bg-amber-600/10 border border-white/5 hover:border-amber-500/40 text-zinc-500 hover:text-amber-400 rounded-[20px] p-3 flex flex-col items-center justify-center gap-2 flex-1 min-w-[110px] h-24 transition-all active:scale-95 group shadow-xl"
+                                    title={`Ulang Match ${currentMatch} — kill & status saja, poin match sebelumnya tetap`}
+                                  >
+                                    <RotateCcw size={16} className="group-hover:rotate-[-45deg] transition-transform" />
+                                    <span className="text-[8px] font-black uppercase tracking-[0.15em] text-center leading-tight">
+                                      RESET MATCH
+                                    </span>
+                                    <span className="text-[7px] font-bold text-zinc-600 group-hover:text-amber-500/80 uppercase">
+                                      M{currentMatch}
+                                    </span>
+                                  </button>
+                                )}
                                 {/* RESET ALL */}
                                 <button onClick={handleResetAll} className="bg-[#1a1a1d] hover:bg-red-600/10 border border-white/5 hover:border-red-500/30 text-zinc-500 hover:text-red-500 rounded-[20px] p-3 flex flex-col items-center justify-center gap-2 flex-1 min-w-[110px] h-24 transition-all active:scale-95 group shadow-xl">
                                     <RotateCcw size={16} className="group-hover:rotate-[-45deg] transition-transform" />
@@ -1196,13 +2188,23 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                 </button>
                             </div>
 
+                            <div className="flex items-center gap-2 px-2 mb-2 flex-wrap">
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border ${
+                                  matchKillRules.finisherKeepsKillOnRevive
+                                    ? 'bg-[#ccff00]/10 text-[#ccff00] border-[#ccff00]/30'
+                                    : 'bg-orange-600/10 text-orange-400 border-orange-500/30'
+                                }`}>
+                                  M{currentMatch} · {matchKillRules.finisherKeepsKillOnRevive ? 'OFF · KILL TETAP' : 'ON · KILL BERKURANG'}
+                                </span>
+                            </div>
+
                             <div className="bg-[#111] border border-white/5 p-1 rounded-2xl">
                                 <div className="grid grid-cols-12 gap-2 px-4 py-3 bg-[#1a1d26] rounded-t-xl mb-1 border-b border-black/20">
                                     <div className="col-span-8 text-[9px] font-black text-[#64748b] tracking-widest uppercase flex items-center gap-2">
                                         <Database size={12} />
                                         TEAM IDENTITY (SLOT 1-16)
                                         <button 
-                                            onClick={() => setVisualConfig(v => ({...v, showFlags: !v.showFlags}))}
+                                            onClick={toggleLeaderboardFlags}
                                             className={`ml-4 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border transition-all flex items-center gap-1.5 ${visualConfig.showFlags ? 'bg-[#ccff00]/10 border-[#ccff00]/30 text-[#ccff00] hover:bg-[#ccff00]/20' : 'bg-zinc-800 border-white/5 text-zinc-600 hover:text-zinc-400'}`}
                                             title={visualConfig.showFlags ? "Hide Country Flags" : "Show Country Flags"}
                                         >
@@ -1265,6 +2267,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                                 {t.playerNames.map((name, pIdx) => {
                                                                     const currentStatus = t.status[pIdx];
                                                                     const currentKills = t.playerKills[pIdx] || 0;
+                                                                    const canManualAddKill = currentStatus === 1;
+                                                                    const placementLocked = t.placementRank !== null;
+                                                                    const canKnockElim =
+                                                                      !placementLocked &&
+                                                                      (currentStatus === 1 || currentStatus === 2);
+                                                                    const canReviveDead =
+                                                                      !placementLocked && currentStatus === 0;
                                                                     return (
                                                                         <div key={pIdx} className="bg-black/40 rounded-lg p-1.5 border border-white/5 hover:border-white/10 transition-all flex flex-col gap-1.5">
                                                                             <div className="flex items-center gap-1 border-b border-white/5 pb-1">
@@ -1274,11 +2283,45 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                                             <div className="flex items-center justify-between bg-zinc-900 rounded border border-white/5 px-1">
                                                                                 <button onClick={() => updatePlayerKills(idx, pIdx, -1)} className="w-4 h-4 flex items-center justify-center hover:text-white text-zinc-500"><Minus size={8}/></button>
                                                                                 <span className="text-[9px] font-black text-[#ccff00]">{currentKills}</span>
-                                                                                <button onClick={() => updatePlayerKills(idx, pIdx, 1)} className="w-4 h-4 flex items-center justify-center hover:text-white text-zinc-500"><Plus size={8}/></button>
+                                                                                <button
+                                                                                  type="button"
+                                                                                  disabled={!canManualAddKill}
+                                                                                  onClick={() => canManualAddKill && openKillVictimModal(idx, pIdx)}
+                                                                                  className={`w-4 h-4 flex items-center justify-center transition-all ${canManualAddKill ? 'hover:text-[#ccff00] text-zinc-500' : 'text-zinc-800 cursor-not-allowed opacity-35'}`}
+                                                                                  title={canManualAddKill ? 'Tambah kill — pilih korban' : 'OFF — pemain knock/mati tidak bisa + manual'}
+                                                                                >
+                                                                                  <Plus size={8} />
+                                                                                </button>
                                                                             </div>
                                                                             <div className="flex gap-1">
-                                                                                <button onClick={() => setPlayerStatus(idx, pIdx, 2)} className={`flex-1 py-1 rounded text-[6px] font-black uppercase ${currentStatus === 2 ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700'}`}>K</button>
-                                                                                <button onClick={() => setPlayerStatus(idx, pIdx, 0)} className={`flex-1 py-1 rounded text-[6px] font-black uppercase ${currentStatus === 0 ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700'}`}>E</button>
+                                                                                <button
+                                                                                  type="button"
+                                                                                  disabled={!canKnockElim}
+                                                                                  onClick={() => canKnockElim && handleKnock(idx, pIdx)}
+                                                                                  className={`flex-1 py-1 rounded text-[6px] font-black uppercase ${currentStatus === 2 && canKnockElim ? 'bg-red-600 text-white' : canKnockElim ? 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700' : 'bg-zinc-900 text-zinc-800 cursor-not-allowed opacity-40'}`}
+                                                                                  title={placementLocked ? 'Tim eliminasi — terkunci' : 'Knock / Revive knock'}
+                                                                                >
+                                                                                  K
+                                                                                </button>
+                                                                                <button
+                                                                                  type="button"
+                                                                                  disabled={placementLocked ? currentStatus !== 1 && currentStatus !== 2 : false}
+                                                                                  onClick={() => {
+                                                                                    if (currentStatus === 0 && !canReviveDead) return;
+                                                                                    if (placementLocked && currentStatus === 0) return;
+                                                                                    handleElimButton(idx, pIdx);
+                                                                                  }}
+                                                                                  className={`flex-1 py-1 rounded text-[6px] font-black uppercase ${currentStatus === 0 && canReviveDead ? 'bg-red-900/80 text-red-300 hover:bg-red-800' : currentStatus === 0 ? 'bg-zinc-900 text-zinc-800 cursor-not-allowed opacity-40' : 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700'}`}
+                                                                                  title={
+                                                                                    placementLocked
+                                                                                      ? 'Tim eliminasi — tidak bisa revive'
+                                                                                      : currentStatus === 0
+                                                                                        ? `Revive — ${matchKillRules.finisherKeepsKillOnRevive ? 'kill finisher tetap' : 'kill finisher dikurangi'}`
+                                                                                        : 'Elim — pilih penyebab mati'
+                                                                                  }
+                                                                                >
+                                                                                  E
+                                                                                </button>
                                                                             </div>
                                                                         </div>
                                                                     );
@@ -1301,6 +2344,16 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                                 PLACED: #{t.placementRank}
                                                             </span>
                                                         )}
+                                                        {findLastKillEventIndexForTeam(killEventLog, idx) >= 0 && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleUndoTeam(idx)}
+                                                            title="Batalkan aksi terakhir tim ini (knock/kill/elim) dari log"
+                                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-orange-600/20 border border-orange-500/40 text-orange-300 hover:bg-orange-600/35 text-[7px] font-black rounded-sm uppercase tracking-tighter transition-colors"
+                                                          >
+                                                            <Undo2 size={8} /> UNDO
+                                                          </button>
+                                                        )}
                                                     </div>
                                                     <button onClick={() => toggleRowExpanded(idx)} className={`w-8 h-8 rounded flex items-center justify-center transition-colors ${t.expanded ? 'bg-[#ccff00] text-black' : 'bg-black/20 text-zinc-500 hover:text-white'}`}>
                                                         {t.expanded ? <ChevronUp size={14} /> : <Settings2 size={14} />}
@@ -1315,33 +2368,117 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                     )}
 
                     {configTab === 'VISUAL' && (
-                        <div className="space-y-6 animate-in fade-in duration-300">
+                        <div className="space-y-4 animate-in fade-in duration-300">
+                          {visualSettingsPanel === 'choose' && (
+                            <div className="space-y-4">
+                              <div className="text-center py-2">
+                                <h3 className="text-[10px] font-black text-white uppercase tracking-[0.25em]">
+                                  Pilih pengaturan visual
+                                </h3>
+                                <p className="text-[8px] text-zinc-500 normal-case mt-1.5 max-w-md mx-auto leading-relaxed">
+                                  Overall Ranking dan Elimination Banner dipisah agar lebih mudah diatur.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button
+                                  type="button"
+                                  onClick={() => setVisualSettingsPanel('leaderboard')}
+                                  className="group p-6 bg-zinc-900 border border-white/10 rounded-[20px] text-left hover:border-[#ccff00]/50 hover:bg-zinc-900/80 transition-all shadow-sm"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-[#ccff00]/15 border border-[#ccff00]/30 flex items-center justify-center mb-4 group-hover:bg-[#ccff00]/25 transition-colors">
+                                    <ListOrdered size={22} className="text-[#ccff00]" />
+                                  </div>
+                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest mb-1">
+                                    Overall Ranking
+                                  </h4>
+                                  <p className="text-[8px] text-zinc-500 normal-case leading-relaxed">
+                                    Panel (warna) atau Custom Image (link), layout, posisi, dan jenis font.
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisualSettingsPanel('elimination')}
+                                  className="group p-6 bg-zinc-900 border border-white/10 rounded-[20px] text-left hover:border-red-500/40 hover:bg-zinc-900/80 transition-all shadow-sm"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center mb-4 group-hover:bg-red-500/25 transition-colors">
+                                    <Skull size={22} className="text-red-400" />
+                                  </div>
+                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest mb-1">
+                                    Elimination Banner
+                                  </h4>
+                                  <p className="text-[8px] text-zinc-500 normal-case leading-relaxed">
+                                    Panel / Custom Image, preview, posisi banner, font, warna, dan overlay # / TAG.
+                                  </p>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {visualSettingsPanel !== 'choose' && (
+                            <button
+                              type="button"
+                              onClick={() => setVisualSettingsPanel('choose')}
+                              className="flex items-center gap-2 text-[8px] font-black text-zinc-500 hover:text-[#ccff00] uppercase tracking-widest transition-colors"
+                            >
+                              <Undo2 size={12} />
+                              Kembali ke pilihan
+                            </button>
+                          )}
+
+                          {visualSettingsPanel === 'leaderboard' && (
+                        <div className="space-y-6">
                            <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
-                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12} className="text-[#ccff00]"/> GLOBAL THEME</h4>
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2">
+                                  <Link2 size={12} className="text-[#ccff00]" />
+                                  Desain Overall Ranking
+                                </h4>
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 tracking-wide">
+                                  Panel = warna solid · Custom Image = background via link (seperti Elimination Banner)
+                                </p>
+                                <div className="flex gap-2">
+                                  {(['panels', 'customImage'] as const satisfies readonly LeaderboardDesignMode[]).map(
+                                    (mode) => (
+                                      <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() =>
+                                          setVisualConfig((prev) => ({
+                                            ...prev,
+                                            leaderboardDesignMode: mode,
+                                          }))
+                                        }
+                                        className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all ${
+                                          (visualConfig.leaderboardDesignMode ?? 'panels') === mode
+                                            ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                            : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                        }`}
+                                      >
+                                        {LEADERBOARD_DESIGN_MODE_LABELS[mode]}
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                           </div>
+
+                           {isLeaderboardPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12} className="text-[#ccff00]"/> WARNA PANEL</h4>
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 leading-relaxed">
+                                  Mode panel — atur background & teks dengan color picker (tanpa gambar link).
+                                </p>
                                 <div className="grid grid-cols-6 gap-3">
                                     {[
-                                        { label: 'HEADER BG', key: 'headerBg' },
-                                        { label: 'HEADER TEXT', key: 'headerText' },
-                                        { label: 'ROW EVEN', key: 'rowEvenBg' },
-                                        { label: 'ROW ODD', key: 'rowOddBg' },
-                                        { label: 'DELTA PTS', key: 'deltaPointsColor', labelColor: '#ccff00' },
-                                        { label: 'TEAM NAME', key: 'teamNameColor' },
-                                        { label: 'RANK COLOR', key: 'rankColor' },
-                                        { label: 'ELIM BG', key: 'eliminatedBg' },
-                                        { label: 'ELIM TEXT', key: 'eliminatedText' },
-                                        { label: 'WINNER BG', key: 'winnerBg' },
-                                        { label: 'WINNER TEXT', key: 'winnerText' },
-                                        { label: 'STATUS BORDER', key: 'statusBorder' },
-                                        { label: 'STATUS TEXT', key: 'statusText' },
-                                    ].map((item) => (
-                                        <div key={item.key} className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24">
+                                      ...LEADERBOARD_PANEL_BG_COLOR_KEYS,
+                                      ...LEADERBOARD_TEXT_COLOR_KEYS,
+                                    ].map((key) => (
+                                        <div key={key} className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24">
                                             <div className="flex justify-between items-start relative z-30">
-                                                <label className="text-[7px] font-black uppercase tracking-widest pointer-events-none" style={{ color: item.labelColor || '#71717a' }}>{item.label}</label>
+                                                <label className="text-[7px] font-black uppercase tracking-widest pointer-events-none text-zinc-500">{LEADERBOARD_COLOR_LABELS[key]}</label>
                                                 <button 
                                                     onClick={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
-                                                        setVisualConfig(prev => ({...prev, [item.key]: (INITIAL_VISUAL_CONFIG as any)[item.key]}));
+                                                        setVisualConfig(prev => ({...prev, [key]: (INITIAL_VISUAL_CONFIG as any)[key]}));
                                                     }}
                                                     className="p-1 -mt-1 -mr-1 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
                                                     title="Reset to Default"
@@ -1350,20 +2487,20 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 </button>
                                             </div>
                                             <div className="flex items-end justify-between z-10 relative pointer-events-none">
-                                                <span className="text-[11px] font-[1000] text-white uppercase tracking-wider truncate">{(visualConfig as any)[item.key]}</span>
+                                                <span className="text-[11px] font-[1000] text-white uppercase tracking-wider truncate">{(visualConfig as any)[key]}</span>
                                             </div>
                                             <input 
                                                 type="color" 
-                                                value={(visualConfig as any)[item.key]} 
-                                                onChange={(e) => setVisualConfig({...visualConfig, [item.key]: e.target.value})} 
+                                                value={(visualConfig as any)[key]} 
+                                                onChange={(e) => setVisualConfig({...visualConfig, [key]: e.target.value})} 
                                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" 
                                             />
-                                            <div className="absolute inset-0 opacity-20 transition-opacity group-hover:opacity-30 pointer-events-none" style={{ backgroundColor: (visualConfig as any)[item.key] }} />
-                                            <div className="absolute bottom-3 right-3 w-6 h-6 rounded-full shadow-sm border border-white/20 pointer-events-none" style={{ backgroundColor: (visualConfig as any)[item.key] }} />
+                                            <div className="absolute inset-0 opacity-20 transition-opacity group-hover:opacity-30 pointer-events-none" style={{ backgroundColor: (visualConfig as any)[key] }} />
+                                            <div className="absolute bottom-3 right-3 w-6 h-6 rounded-full shadow-sm border border-white/20 pointer-events-none" style={{ backgroundColor: (visualConfig as any)[key] }} />
                                         </div>
                                     ))}
                                     
-                                    <div className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24 cursor-pointer" onClick={() => setVisualConfig(v => ({...v, showFlags: !v.showFlags}))}>
+                                    <div className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24 cursor-pointer" onClick={toggleLeaderboardFlags}>
                                         <label className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">FLAGS</label>
                                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${visualConfig.showFlags ? 'bg-[#ccff00] text-black' : 'bg-zinc-800 text-zinc-600'}`}>
                                             <Flag size={20} fill={visualConfig.showFlags ? "currentColor" : "none"} />
@@ -1371,9 +2508,174 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     </div>
                                 </div>
                            </div>
+                           )}
+
+                           {!isLeaderboardPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-black/40 border border-[#ccff00]/20 rounded-xl space-y-4">
+                                <h4 className="text-[9px] font-black text-[#ccff00] uppercase tracking-widest flex items-center gap-2">
+                                  <Image size={12} />
+                                  Custom Image (LINK)
+                                </h4>
+                                <p className="text-[7px] text-zinc-500 normal-case leading-relaxed">
+                                  PNG/JPG/SVG per zona · area transparan bisa pakai warna fallback di bawah.
+                                </p>
+                                <div className="space-y-3">
+                                  {LEADERBOARD_BG_IMAGE_KEYS.map((key) => (
+                                    <div
+                                      key={key}
+                                      className="p-3 bg-black/40 border border-white/10 rounded-xl"
+                                    >
+                                      <label className="text-[7px] font-bold text-zinc-500 uppercase block mb-1">
+                                        {LEADERBOARD_BG_IMAGE_LABELS[key]}
+                                      </label>
+                                      <p className="text-[6px] text-zinc-600 normal-case mb-2 leading-relaxed">
+                                        {LEADERBOARD_BG_IMAGE_HINTS[key]}
+                                      </p>
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="url"
+                                          placeholder="https://... atau /path/bg.png"
+                                          value={visualConfig[key]}
+                                          onChange={(e) =>
+                                            setVisualConfig((prev) => ({
+                                              ...prev,
+                                              [key]: e.target.value,
+                                            }))
+                                          }
+                                          className="flex-1 min-w-0 bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white outline-none focus:border-[#ccff00]"
+                                        />
+                                        <label className="shrink-0 px-2 py-2 bg-zinc-800 border border-white/10 rounded-lg text-[7px] font-black text-zinc-400 uppercase tracking-widest cursor-pointer hover:border-[#ccff00]/50 hover:text-[#ccff00] transition-colors">
+                                          <Upload size={10} className="inline mr-1" />
+                                          File
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                              handleLeaderboardBgImageUpload(
+                                                key,
+                                                e.target.files?.[0]
+                                              );
+                                              e.target.value = '';
+                                            }}
+                                          />
+                                        </label>
+                                        {visualConfig[key] && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setVisualConfig((prev) => ({
+                                                ...prev,
+                                                [key]: '',
+                                              }))
+                                            }
+                                            className="shrink-0 px-2 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+                                            title="Hapus gambar"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setVisualConfig((prev) => ({
+                                      ...prev,
+                                      ...DEFAULT_LEADERBOARD_BACKGROUND_IMAGES,
+                                    }))
+                                  }
+                                  className="mt-3 text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                >
+                                  <RotateCcw size={10} /> Reset semua background gambar
+                                </button>
+                           </div>
+                           )}
+
+                           {!isLeaderboardPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <Palette size={12} className="text-zinc-400" />
+                                  Warna teks
+                                </h4>
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 leading-relaxed">
+                                  Custom Image — atur warna teks & status saja. Background dari link gambar di atas.
+                                </p>
+                                <div className="grid grid-cols-6 gap-3">
+                                  {LEADERBOARD_TEXT_COLOR_KEYS.map((key) => (
+                                    <div
+                                      key={key}
+                                      className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24"
+                                    >
+                                      <div className="flex justify-between items-start relative z-30">
+                                        <label className="text-[7px] font-black uppercase tracking-widest pointer-events-none text-zinc-500">
+                                          {LEADERBOARD_COLOR_LABELS[key]}
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setVisualConfig((prev) => ({
+                                              ...prev,
+                                              [key]: (INITIAL_VISUAL_CONFIG as any)[key],
+                                            }));
+                                          }}
+                                          className="p-1 -mt-1 -mr-1 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                          title="Reset"
+                                        >
+                                          <RotateCcw size={10} />
+                                        </button>
+                                      </div>
+                                      <span className="text-[11px] font-[1000] text-white uppercase tracking-wider truncate relative z-10 pointer-events-none">
+                                        {(visualConfig as any)[key]}
+                                      </span>
+                                      <input
+                                        type="color"
+                                        value={(visualConfig as any)[key]}
+                                        onChange={(e) =>
+                                          setVisualConfig({
+                                            ...visualConfig,
+                                            [key]: e.target.value,
+                                          })
+                                        }
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                      />
+                                      <div
+                                        className="absolute inset-0 opacity-20 group-hover:opacity-30 pointer-events-none"
+                                        style={{ backgroundColor: (visualConfig as any)[key] }}
+                                      />
+                                      <div
+                                        className="absolute bottom-3 right-3 w-6 h-6 rounded-full border border-white/20 pointer-events-none"
+                                        style={{ backgroundColor: (visualConfig as any)[key] }}
+                                      />
+                                    </div>
+                                  ))}
+                                  <div
+                                    className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24 cursor-pointer"
+                                    onClick={toggleLeaderboardFlags}
+                                  >
+                                    <label className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">
+                                      FLAGS
+                                    </label>
+                                    <div
+                                      className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${visualConfig.showFlags ? 'bg-[#ccff00] text-black' : 'bg-zinc-800 text-zinc-600'}`}
+                                    >
+                                      <Flag
+                                        size={20}
+                                        fill={visualConfig.showFlags ? 'currentColor' : 'none'}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                           </div>
+                           )}
+
                            <div className="p-6 bg-zinc-900 border border-white/5 rounded-[20px] shadow-sm">
                                 <div className="flex justify-between items-center mb-4">
-                                   <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2"><Move size={12} className="text-zinc-400" />LAYOUT TRANSFORM</h3>
+                                   <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2"><Move size={12} className="text-zinc-400" />LAYOUT TRANSFORM (LEADERBOARD)</h3>
                                    <button 
                                        onClick={() => setLayoutConfig({
                                            scale: 80,
@@ -1382,14 +2684,20 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                            rowHeight: 52,
                                            fontSize: 18,
                                            logoSize: 32,
-                                           flagWidth: 24
+                                           flagWidth: 24,
+                                           panelWidth: leaderboardPanelWidthForFlags(visualConfig.showFlags),
+                                           fontFamilyId: DEFAULT_OVERLAY_FONT_FAMILY_ID,
                                        })}
                                        className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
                                    >
                                        <RotateCcw size={10} /> RESET POSITION
                                    </button>
                                 </div>
-                                <div className="grid grid-cols-5 gap-3">
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 leading-relaxed">
+                                  Lebar panel otomatis: 380 px tanpa flag, 450 px dengan flag (bisa disesuaikan manual).
+                                </p>
+                                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">PANEL WIDTH (px)</label><ScrollableInput value={leaderboardPanelWidth} onChange={(val) => setLayoutConfig({...layoutConfig, panelWidth: resolveLeaderboardPanelWidth(val)})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE (%)</label><ScrollableInput value={layoutConfig.scale} onChange={(val) => setLayoutConfig({...layoutConfig, scale: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">ROW HEIGHT</label><ScrollableInput value={layoutConfig.rowHeight} onChange={(val) => setLayoutConfig({...layoutConfig, rowHeight: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                     {visualConfig.showFlags && (
@@ -1400,8 +2708,678 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     )}
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X</label><ScrollableInput value={layoutConfig.xOffset} onChange={(val) => setLayoutConfig({...layoutConfig, xOffset: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y</label><ScrollableInput value={layoutConfig.yOffset} onChange={(val) => setLayoutConfig({...layoutConfig, yOffset: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">LOGO SIZE</label><ScrollableInput value={layoutConfig.logoSize} onChange={(val) => setLayoutConfig({...layoutConfig, logoSize: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <Type size={12} className="text-[#ccff00]" />
+                                    Jenis font (Overall Ranking)
+                                  </h4>
+                                  <p className="text-[7px] text-zinc-500 normal-case mb-2 leading-relaxed">
+                                    Judul, nama tim, rank, poin, status, ELIMINATED / WINNER.
+                                  </p>
+                                  <OverlayFontFamilySelect
+                                    value={layoutConfig.fontFamilyId}
+                                    onChange={(fontFamilyId) =>
+                                      setLayoutConfig((prev) => ({ ...prev, fontFamilyId }))
+                                    }
+                                  />
                                 </div>
                            </div>
+                        </div>
+                          )}
+
+                          {visualSettingsPanel === 'elimination' && (
+                        <div className="space-y-6">
+                           <div className="p-6 bg-zinc-900 border border-white/5 rounded-[20px] shadow-sm">
+                                <div className="flex justify-between items-center mb-4">
+                                   <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2"><Skull size={12} className="text-red-500" />ELIMINATION BANNER</h3>
+                                   <div className="flex flex-col items-end gap-2">
+                                   <div className="flex items-center gap-2">
+                                     <button
+                                       type="button"
+                                       onClick={previewEliminationBanner}
+                                       disabled={elimBannerHoldPreview}
+                                       className={`text-[7px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors ${
+                                         elimBannerHoldPreview
+                                           ? 'text-zinc-700 cursor-not-allowed'
+                                           : 'text-zinc-500 hover:text-[#ccff00]'
+                                       }`}
+                                       title={elimBannerHoldPreview ? 'Matikan Preview Sementara dulu' : undefined}
+                                     >
+                                       <Play size={10} /> PREVIEW
+                                     </button>
+                                     <button
+                                       type="button"
+                                       onClick={() => {
+                                         setElimBannerHoldPreviewSafe(false);
+                                         setElimBannerLayout(DEFAULT_ELIMINATION_BANNER_LAYOUT);
+                                         setVisualConfig((prev) => ({
+                                           ...prev,
+                                           ...DEFAULT_ELIMINATION_BANNER_VISUAL,
+                                         }));
+                                       }}
+                                       className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                     >
+                                       <RotateCcw size={10} /> RESET
+                                     </button>
+                                   </div>
+                                   <label
+                                     className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                                       elimBannerHoldPreview
+                                         ? 'bg-[#ccff00]/15 border-[#ccff00]/50 text-[#ccff00]'
+                                         : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'
+                                     }`}
+                                   >
+                                     <input
+                                       type="checkbox"
+                                       checked={elimBannerHoldPreview}
+                                       onChange={(e) => setElimBannerHoldPreviewSafe(e.target.checked)}
+                                       className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
+                                     />
+                                     <Eye size={10} />
+                                     <span className="text-[7px] font-black uppercase tracking-widest">
+                                       Preview Sementara
+                                     </span>
+                                   </label>
+                                   </div>
+                                </div>
+                                <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
+                                  Geser <span className="text-zinc-400">seluruh banner eliminasi</span> di canvas
+                                  1920×1080 · POS X positif = kanan · bukan LAYOUT TRANSFORM leaderboard di atas.
+                                  {elimBannerHoldPreview && (
+                                    <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
+                                      Preview aktif — SCALE / POS X / POS Y langsung terlihat di monitor
+                                    </span>
+                                  )}
+                                </p>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ScrollableInput value={elimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ScrollableInput value={elimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ScrollableInput value={elimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <Type size={12} className="text-[#ccff00]" />
+                                    Jenis font
+                                  </h4>
+                                  <p className="text-[7px] text-zinc-500 normal-case mb-2 leading-relaxed">
+                                    Berlaku untuk ELIMINATED, #, dan TAG (Panel & Custom Image). Font
+                                    Google dimuat otomatis; font khusus (Ethnocentric, dll.) perlu terpasang di PC
+                                    streaming atau file di folder <span className="text-zinc-400">public/fonts</span>.
+                                  </p>
+                                  <select
+                                    value={elimBannerFontFamilyId}
+                                    onChange={(e) =>
+                                      setVisualConfig((prev) => ({
+                                        ...prev,
+                                        elimBannerFontFamily: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-[11px] text-white font-bold outline-none focus:border-[#ccff00] cursor-pointer"
+                                    style={{
+                                      fontFamily: getEliminationBannerFontCssFamily(
+                                        elimBannerFontFamilyId
+                                      ),
+                                    }}
+                                  >
+                                    {ELIMINATION_BANNER_FONT_FAMILY_OPTIONS.map((opt) => (
+                                      <option
+                                        key={opt.id}
+                                        value={opt.id}
+                                        style={{ fontFamily: opt.cssFamily }}
+                                      >
+                                        {opt.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2">
+                                    Ukuran font (px)
+                                  </h4>
+                                  <p className="text-[7px] text-zinc-500 normal-case mb-3 leading-relaxed">
+                                    {elimBannerIsPanelsMode
+                                      ? 'Panel — ELIMINATED, #, dan TAG tim.'
+                                      : 'Custom Image — # dan TAG (ELIMINATED ada di gambar PNG). Font di overlay sinkron dengan kontrol di bawah.'}
+                                    {elimBannerHoldPreview && (
+                                      <span className="block mt-1 text-[#ccff00]">
+                                        Preview aktif — perubahan langsung terlihat
+                                      </span>
+                                    )}
+                                  </p>
+                                  <div
+                                    className={`grid gap-3 ${
+                                      elimBannerIsPanelsMode ? 'grid-cols-3' : 'grid-cols-2'
+                                    }`}
+                                  >
+                                    {(elimBannerIsPanelsMode
+                                      ? ELIMINATION_BANNER_FONT_KEYS_PANEL
+                                      : ELIMINATION_BANNER_FONT_KEYS_CUSTOM_IMAGE
+                                    ).map((fontKey) => (
+                                      <div key={fontKey}>
+                                        <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
+                                          {ELIMINATION_BANNER_FONT_LABELS[fontKey]}
+                                        </label>
+                                        <ScrollableInput
+                                          value={elimBannerTypography[fontKey]}
+                                          onChange={(val) =>
+                                            patchElimBannerTypography(fontKey, val)
+                                          }
+                                          className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="mt-5 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2">
+                                    <Link2 size={12} className="text-[#ccff00]" />
+                                    DESAIN GAMBAR (LINK)
+                                  </h4>
+                                  <p className="text-[7px] text-zinc-500 uppercase mb-3 tracking-wide">
+                                    Panel = warna bawaan · Custom Image = link gambar + posisi overlay
+                                  </p>
+                                  <div className="flex gap-2 mb-3">
+                                    <button
+                                      type="button"
+                                      disabled={elimBannerPanelSwitchLocked}
+                                      title={
+                                        elimBannerPanelSwitchLocked
+                                          ? elimBannerDesignSwitchLockTitle
+                                          : undefined
+                                      }
+                                      onClick={() =>
+                                        setVisualConfig((prev) => ({
+                                          ...prev,
+                                          elimBannerDesignMode: 'panels',
+                                        }))
+                                      }
+                                      className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all ${
+                                        elimBannerIsPanelsMode
+                                          ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                          : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                      } ${
+                                        elimBannerPanelSwitchLocked
+                                          ? 'opacity-40 cursor-not-allowed hover:border-white/10'
+                                          : ''
+                                      }`}
+                                    >
+                                      Panel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={elimBannerCustomSwitchLocked}
+                                      title={
+                                        elimBannerCustomSwitchLocked
+                                          ? elimBannerDesignSwitchLockTitle
+                                          : undefined
+                                      }
+                                      onClick={() =>
+                                        setVisualConfig((prev) => ({
+                                          ...prev,
+                                          elimBannerDesignMode: 'full',
+                                        }))
+                                      }
+                                      className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all ${
+                                        !elimBannerIsPanelsMode
+                                          ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                          : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                      } ${
+                                        elimBannerCustomSwitchLocked
+                                          ? 'opacity-40 cursor-not-allowed hover:border-white/10'
+                                          : ''
+                                      }`}
+                                    >
+                                      Custom Image
+                                    </button>
+                                  </div>
+                                  {elimBannerHoldPreview && (
+                                    <p className="text-[7px] text-zinc-500 normal-case leading-relaxed mb-2 -mt-1">
+                                      Preview aktif — matikan Preview Sementara untuk ganti Panel / Custom Image
+                                      {visualConfig.elimBannerDesignMode === 'full'
+                                        ? elimBannerCustomVariant === 'fullLink'
+                                          ? ', Custom Image (LINK) / Panel BG (LINK), atau Utuh / Penuh'
+                                          : ' atau Custom Image (LINK) / Panel BG (LINK)'
+                                        : ''}
+                                      .
+                                    </p>
+                                  )}
+
+                                  {visualConfig.elimBannerDesignMode !== 'full' ? (
+                                    <p className="text-[7px] text-zinc-600 normal-case leading-relaxed mb-2">
+                                      Mode panel aktif — logo, <span className="text-zinc-400">#</span>,{' '}
+                                      <span className="text-zinc-400">TAG</span> (panel kanan), dan{' '}
+                                      <span className="text-zinc-400">ELIMINATED</span> (tengah) selalu tampil.
+                                      Atur hanya warna BG & teks di{' '}
+                                      <span className="text-zinc-400">Banner Background & Text</span> di bawah.
+                                      Untuk gambar via link, pilih{' '}
+                                      <span className="text-[#ccff00]">Custom Image</span>.
+                                    </p>
+                                  ) : (
+                                    <div className="p-4 bg-black/40 border border-[#ccff00]/20 rounded-xl space-y-3">
+                                      <h5 className="text-[8px] font-black text-[#ccff00] uppercase tracking-[0.2em]">
+                                        Custom Image
+                                      </h5>
+
+                                      <div className="flex gap-2">
+                                        {(
+                                          ['fullLink', 'panelLinks'] as const satisfies readonly EliminationBannerCustomImageVariant[]
+                                        ).map((variant) => {
+                                          const isActive = elimBannerCustomVariant === variant;
+                                          const switchLocked =
+                                            variant === 'fullLink'
+                                              ? elimBannerFullLinkSwitchLocked
+                                              : elimBannerPanelLinksSwitchLocked;
+                                          return (
+                                          <button
+                                            key={variant}
+                                            type="button"
+                                            disabled={switchLocked}
+                                            title={
+                                              switchLocked
+                                                ? elimBannerDesignSwitchLockTitle
+                                                : undefined
+                                            }
+                                            onClick={() =>
+                                              setVisualConfig((prev) => ({
+                                                ...prev,
+                                                elimBannerCustomImageVariant: variant,
+                                              }))
+                                            }
+                                            className={`flex-1 py-2 rounded-lg text-[7px] font-black uppercase tracking-widest border transition-all leading-tight ${
+                                              isActive
+                                                ? 'bg-white/10 text-[#ccff00] border-[#ccff00]/50'
+                                                : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                            } ${
+                                              switchLocked
+                                                ? 'opacity-40 cursor-not-allowed hover:border-white/10'
+                                                : ''
+                                            }`}
+                                          >
+                                            {ELIMINATION_BANNER_CUSTOM_IMAGE_VARIANT_LABELS[variant]}
+                                          </button>
+                                          );
+                                        })}
+                                      </div>
+
+                                      <p className="text-[7px] text-zinc-500 normal-case leading-relaxed">
+                                        Logo tim (sistem), <span className="text-zinc-400">#</span>, dan{' '}
+                                        <span className="text-zinc-400">TAG</span> selalu tampil.
+                                        {(visualConfig.elimBannerCustomImageVariant ?? 'fullLink') ===
+                                        'panelLinks'
+                                          ? ' ELIMINATED biasanya ada di gambar MAIN panel (link).'
+                                          : ' Atur posisi di bagian overlay bawah (Custom Image LINK).'}
+                                      </p>
+
+                                      {(
+                                        (visualConfig.elimBannerCustomImageVariant ?? 'fullLink') === 'fullLink'
+                                          ? (['elimBannerFullImageUrl'] as const)
+                                          : ELIMINATION_BANNER_CUSTOM_PANEL_IMAGE_KEYS
+                                      ).map((key) => (
+                                        <div key={key} className="mb-1">
+                                          <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                            <span className="inline-flex items-center gap-1">
+                                              <Image size={10} className="text-zinc-500 shrink-0" />
+                                              {ELIMINATION_BANNER_IMAGE_LABELS[key]}
+                                            </span>
+                                            <span className="text-[6px] font-bold text-zinc-500 normal-case tracking-normal">
+                                              Panel {ELIMINATION_BANNER_IMAGE_SIZE_HINTS[key].canvas} px · rasio{' '}
+                                              {ELIMINATION_BANNER_IMAGE_SIZE_HINTS[key].ratio}
+                                            </span>
+                                          </label>
+                                          <div className="flex gap-2">
+                                            <input
+                                              type="url"
+                                              placeholder="https://... atau /path/asset.png"
+                                              value={visualConfig[key]}
+                                              onChange={(e) =>
+                                                setVisualConfig((prev) => ({
+                                                  ...prev,
+                                                  [key]: e.target.value,
+                                                }))
+                                              }
+                                              className="flex-1 bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white placeholder:text-zinc-700"
+                                            />
+                                            <label className="shrink-0 px-2 py-2 bg-zinc-800 border border-white/10 rounded-lg cursor-pointer hover:bg-zinc-700 transition-colors flex items-center">
+                                              <Upload size={12} className="text-zinc-400" />
+                                              <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={(e) => {
+                                                  handleElimBannerImageUpload(key, e.target.files?.[0]);
+                                                  e.target.value = '';
+                                                }}
+                                              />
+                                            </label>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setVisualConfig((prev) => ({
+                                                  ...prev,
+                                                  [key]: '',
+                                                }))
+                                              }
+                                              className="shrink-0 px-2 py-2 bg-black border border-white/10 rounded-lg hover:border-red-500/40 transition-colors"
+                                              title="Hapus link"
+                                            >
+                                              <Trash2 size={12} className="text-zinc-500" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+
+                                      {(visualConfig.elimBannerCustomImageVariant ?? 'fullLink') ===
+                                        'fullLink' && (
+                                        <div className="mt-3 pt-3 border-t border-white/10 space-y-3">
+                                          <p className="text-[7px] text-zinc-500 normal-case leading-relaxed">
+                                            {ELIMINATION_BANNER_FULL_IMAGE_FIT_NOTE}
+                                          </p>
+                                          <div className="flex gap-2">
+                                            {(
+                                              ['contain', 'cover'] as const satisfies readonly EliminationBannerFullImageFit[]
+                                            ).map((fit) => {
+                                              const isActive = elimBannerFullImageFit === fit;
+                                              const switchLocked =
+                                                fit === 'contain'
+                                                  ? elimBannerContainFitSwitchLocked
+                                                  : elimBannerCoverFitSwitchLocked;
+                                              return (
+                                              <button
+                                                key={fit}
+                                                type="button"
+                                                disabled={switchLocked}
+                                                title={
+                                                  switchLocked
+                                                    ? elimBannerDesignSwitchLockTitle
+                                                    : undefined
+                                                }
+                                                onClick={() =>
+                                                  setVisualConfig((prev) => ({
+                                                    ...prev,
+                                                    elimBannerFullImageFit: fit,
+                                                  }))
+                                                }
+                                                className={`flex-1 py-2 rounded-lg text-[7px] font-black uppercase tracking-widest border transition-all ${
+                                                  isActive
+                                                    ? 'bg-[#ccff00]/20 text-[#ccff00] border-[#ccff00]/50'
+                                                    : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                                } ${
+                                                  switchLocked
+                                                    ? 'opacity-40 cursor-not-allowed hover:border-white/10'
+                                                    : ''
+                                                }`}
+                                              >
+                                                {ELIMINATION_BANNER_FULL_IMAGE_FIT_LABELS[fit]}
+                                              </button>
+                                              );
+                                            })}
+                                          </div>
+                                          {(visualConfig.elimBannerFullImageFit ?? 'contain') === 'contain' && (
+                                            <div>
+                                              <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
+                                                Zoom gambar % (utuh)
+                                              </label>
+                                              <ScrollableInput
+                                                value={visualConfig.elimBannerFullImageZoom ?? 100}
+                                                onChange={(val) =>
+                                                  setVisualConfig((prev) => ({
+                                                    ...prev,
+                                                    elimBannerFullImageZoom: Math.min(
+                                                      300,
+                                                      Math.max(25, val)
+                                                    ),
+                                                  }))
+                                                }
+                                                className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                                              />
+                                              <p className="text-[6px] text-zinc-600 normal-case mt-1">
+                                                Kanvas 16:9 (640×360) · 100 = normal · naikkan (mis. 130–160) agar
+                                                PNG lebih besar · atur SCALE banner di atas untuk OBS · max 300
+                                              </p>
+                                            </div>
+                                          )}
+                                          {(visualConfig.elimBannerFullImageFit ?? 'contain') === 'cover' && (
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div>
+                                                <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
+                                                  Posisi gambar X %
+                                                </label>
+                                                <ScrollableInput
+                                                  value={visualConfig.elimBannerFullImagePosX ?? 50}
+                                                  onChange={(val) =>
+                                                    setVisualConfig((prev) => ({
+                                                      ...prev,
+                                                      elimBannerFullImagePosX: val,
+                                                    }))
+                                                  }
+                                                  className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
+                                                  Posisi gambar Y %
+                                                </label>
+                                                <ScrollableInput
+                                                  value={visualConfig.elimBannerFullImagePosY ?? 50}
+                                                  onChange={(val) =>
+                                                    setVisualConfig((prev) => ({
+                                                      ...prev,
+                                                      elimBannerFullImagePosY: val,
+                                                    }))
+                                                  }
+                                                  className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      <p className="text-[7px] text-zinc-500 normal-case leading-relaxed">
+                                        {(visualConfig.elimBannerCustomImageVariant ?? 'fullLink') === 'fullLink'
+                                          ? 'Satu gambar background + atur posisi logo / # / nama di bawah.'
+                                          : 'Logo tim dari sistem · link untuk background tiap panel (layout PMIO).'}
+                                      </p>
+
+                                      {(visualConfig.elimBannerCustomImageVariant ?? 'fullLink') === 'fullLink' && (
+                                      <div className="pt-4 border-t border-white/10">
+                                        <h6 className="text-[8px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
+                                          <Move size={10} className="text-[#ccff00]" />
+                                          Atur posisi overlay (%)
+                                        </h6>
+                                        <p className="text-[7px] text-zinc-500 normal-case mb-4 leading-relaxed">
+                                          {ELIMINATION_BANNER_FULL_LAYOUT_NOTE}
+                                        </p>
+
+                                      {(
+                                        [
+                                          {
+                                            key: 'logo' as const,
+                                            title: 'Logo tim (sistem)',
+                                            fields: [
+                                              { label: 'X %', prop: 'x' as const },
+                                              { label: 'Y %', prop: 'y' as const },
+                                              { label: 'Ukuran %', prop: 'size' as const },
+                                            ],
+                                          },
+                                          {
+                                            key: 'placement' as const,
+                                            title: '# Placement',
+                                            fields: [
+                                              { label: 'X %', prop: 'x' as const },
+                                              { label: 'Y %', prop: 'y' as const },
+                                              { label: 'Font px', prop: 'fontSize' as const },
+                                            ],
+                                          },
+                                          {
+                                            key: 'teamName' as const,
+                                            title: 'TAG tim',
+                                            fields: [
+                                              { label: 'X %', prop: 'x' as const },
+                                              { label: 'Y %', prop: 'y' as const },
+                                              { label: 'Font px', prop: 'fontSize' as const },
+                                            ],
+                                          },
+                                        ] as const
+                                      ).map(({ key, title, fields }) => {
+                                        const slot = fullLayout[key];
+                                        return (
+                                          <div
+                                            key={key}
+                                            className="mb-4 p-3 bg-black/50 border border-white/10 rounded-xl"
+                                          >
+                                            <div className="flex justify-between items-center mb-2">
+                                              <span className="text-[8px] font-black text-white uppercase tracking-widest">
+                                                {title}
+                                              </span>
+                                              <label className="flex items-center gap-1.5 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={slot.visible}
+                                                  onChange={(e) =>
+                                                    patchElimBannerFullLayout(key, {
+                                                      visible: e.target.checked,
+                                                    })
+                                                  }
+                                                  className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00] scale-75"
+                                                />
+                                                <span className="text-[7px] text-zinc-500 uppercase">Tampil</span>
+                                              </label>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                              {fields.map(({ label, prop }) => (
+                                                <div key={prop}>
+                                                  <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1">
+                                                    {label}
+                                                  </label>
+                                                  <ScrollableInput
+                                                    value={
+                                                      prop === 'fontSize' && key === 'placement'
+                                                        ? elimBannerTypography.placement
+                                                        : prop === 'fontSize' && key === 'teamName'
+                                                          ? elimBannerTypography.tag
+                                                          : (slot[prop] as number)
+                                                    }
+                                                    onChange={(val) =>
+                                                      prop === 'fontSize' &&
+                                                      (key === 'placement' || key === 'teamName')
+                                                        ? patchElimBannerTypography(
+                                                            key === 'placement' ? 'placement' : 'tag',
+                                                            val
+                                                          )
+                                                        : patchElimBannerFullLayout(key, {
+                                                            [prop]: val,
+                                                          } as Partial<
+                                                            EliminationBannerFullOverlayLayout[typeof key]
+                                                          >)
+                                                    }
+                                                    className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                                                  />
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setVisualConfig((prev) => ({
+                                            ...prev,
+                                            elimBannerFullLayout: DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT,
+                                            elimBannerTypography: {
+                                              ...DEFAULT_ELIMINATION_BANNER_TYPOGRAPHY,
+                                              placement:
+                                                DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT.placement
+                                                  .fontSize,
+                                              tag: DEFAULT_ELIMINATION_BANNER_FULL_LAYOUT.teamName
+                                                .fontSize,
+                                            },
+                                          }))
+                                        }
+                                        className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                      >
+                                        <RotateCcw size={10} /> Reset posisi overlay
+                                      </button>
+                                      </div>
+                                      )}
+
+                                      <p className="text-[7px] text-zinc-600 normal-case tracking-wide leading-relaxed pt-2">
+                                        {ELIMINATION_BANNER_IMAGE_LINK_NOTE}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="mt-5 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    <Palette size={12} className="text-red-400" />
+                                    {visualConfig.elimBannerDesignMode === 'full'
+                                      ? 'BANNER TEXT'
+                                      : 'BANNER BACKGROUND & TEXT'}
+                                  </h4>
+                                  <div className="grid grid-cols-5 gap-2">
+                                    {(visualConfig.elimBannerDesignMode === 'full'
+                                      ? ELIMINATION_BANNER_TEXT_COLOR_KEYS_CUSTOM_IMAGE
+                                      : ELIMINATION_BANNER_COLOR_KEYS
+                                    ).map((key) => (
+                                      <div
+                                        key={key}
+                                        className="bg-black border border-white/10 rounded-xl p-2.5 flex flex-col justify-between gap-1.5 relative group hover:border-red-500/30 transition-all h-[88px]"
+                                      >
+                                        <div className="flex justify-between items-start relative z-30">
+                                          <label className="text-[6px] font-black uppercase tracking-widest text-zinc-500 pointer-events-none leading-tight">
+                                            {ELIMINATION_BANNER_COLOR_LABELS[key]}
+                                          </label>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              setVisualConfig((prev) => ({
+                                                ...prev,
+                                                [key]: DEFAULT_ELIMINATION_BANNER_VISUAL[key],
+                                              }));
+                                            }}
+                                            className="p-0.5 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                            title="Reset"
+                                          >
+                                            <RotateCcw size={8} />
+                                          </button>
+                                        </div>
+                                        <span className="text-[8px] font-[1000] text-white uppercase truncate relative z-10">
+                                          {visualConfig[key]}
+                                        </span>
+                                        <input
+                                          type="color"
+                                          value={visualConfig[key]}
+                                          onChange={(e) =>
+                                            setVisualConfig({ ...visualConfig, [key]: e.target.value })
+                                          }
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                        />
+                                        <div
+                                          className="absolute inset-0 opacity-25 group-hover:opacity-35 pointer-events-none rounded-xl"
+                                          style={{ backgroundColor: visualConfig[key] }}
+                                        />
+                                        <div
+                                          className="absolute bottom-2 right-2 w-5 h-5 rounded-full border border-white/20 pointer-events-none z-10"
+                                          style={{ backgroundColor: visualConfig[key] }}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="text-[7px] text-zinc-600 uppercase mt-2 tracking-wide normal-case">
+                                    {visualConfig.elimBannerDesignMode === 'full'
+                                      ? 'Custom Image: mode Utuh = pinggir transparan di OBS · tiap event boleh beda ukuran PNG.'
+                                      : 'MAIN BG 1 + 2 = gradien tengah ELIMINATED · warna dipakai jika panel tanpa gambar link'}
+                                  </p>
+                                </div>
+                           </div>
+                        </div>
+                          )}
                         </div>
                     )}
 
@@ -1747,7 +3725,35 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       </div>
 
       <PlacementScoringModal isOpen={isScoringModalOpen} onClose={() => setIsScoringModalOpen(false)} onApply={handleApplyScoring} currentRules={scoringRules} currentKillPoints={killPointValue} />
-      <TieBreakerModal isOpen={isTieBreakerModalOpen} onClose={() => setIsTieBreakerModalOpen(false)} onApply={handleApplyTieBreaker} currentOrder={tieBreakerOrder} />
+      <KnockAttackerModal
+        isOpen={knockAttackerModalVictim !== null}
+        victim={knockAttackerModalVictim}
+        teams={teams}
+        onClose={closeKnockAttackerModal}
+        onSelectKnocker={confirmKnockWithAttacker}
+      />
+      <KillVictimModal
+        isOpen={killVictimModalFinisher !== null}
+        finisher={killVictimModalFinisher}
+        teams={teams}
+        onClose={closeKillVictimModal}
+        onSelectVictim={confirmKillVictim}
+      />
+      <ElimCauseModal
+        isOpen={elimModalVictim !== null}
+        victim={elimModalVictim}
+        teams={teams}
+        onClose={closeElimModal}
+        onSelectElim={confirmElimFromModal}
+      />
+      <TieBreakerModal
+        isOpen={isTieBreakerModalOpen}
+        onClose={() => setIsTieBreakerModalOpen(false)}
+        onApply={handleApplyTieBreaker}
+        currentOrder={tieBreakerOrder}
+        currentMatchKillRules={matchKillRules}
+        currentMatch={currentMatch}
+      />
 
       {isEndMatchModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
@@ -1761,7 +3767,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                         {!isMatchReadyToEnd ? 'SECURITY ALERT' : 'FINALIZE GAME'}
                     </h2>
                     <p className={`text-[10px] font-black uppercase tracking-[0.3em] ${!isMatchReadyToEnd ? 'text-red-500' : 'text-[#ccff00]'}`}>
-                        {!isMatchReadyToEnd ? 'MATCH STILL ONGOING' : 'WINNER IDENTIFIED'}
+                        {!isMatchReadyToEnd
+                          ? 'MATCH STILL ONGOING'
+                          : contentionCount === 2
+                            ? 'FINAL TOP 2 — PLACEMENT BY KILLS'
+                            : 'WINNER IDENTIFIED'}
                     </p>
                 </div>
 
@@ -1769,9 +3779,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                     {!isMatchReadyToEnd ? (
                         <div className="bg-white/5 rounded-2xl p-6 border border-white/5 text-center">
                             <p className="text-xs font-bold text-zinc-400 uppercase leading-relaxed">
-                                Tidak dapat mengakhiri match karena masih ada <span className="text-white font-black">{aliveCount} TIM</span> yang terdeteksi hidup. 
+                                Masih ada <span className="text-white font-black">{contentionCount} TIM</span> tanpa placement (belum di-eliminasi di sistem).
                                 <br/><br/>
-                                Harap eliminasi seluruh tim hingga tersisa satu pemenang (WWCD).
+                                Lanjut ke match berikutnya setelah tersisa maksimal 2 tim (WWCD / final 2), atau eliminasi tim hingga placement terisi.
                             </p>
                         </div>
                     ) : (
@@ -1783,17 +3793,26 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     </div>
                                     <div className="text-left">
                                         <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">DETECTED WINNER</p>
-                                        <h3 className="text-xl font-black text-white uppercase tracking-tight truncate">{matchWinner ? getLeaderboardTeamLabel(matchWinner, projectPlayers) : ''}</h3>
+                                        <h3 className="text-xl font-black text-white uppercase tracking-tight truncate">{matchWinnerCandidate ? getLeaderboardTeamLabel(matchWinnerCandidate, projectPlayers) : ''}</h3>
                                     </div>
                                 </div>
+                                {contentionCount === 2 && matchRunnerUp && (
+                                  <div className="bg-white/5 rounded-2xl p-4 border border-white/5 flex items-center justify-between gap-3">
+                                    <div className="min-w-0 text-left">
+                                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">#2 BY KILLS</p>
+                                      <h3 className="text-sm font-black text-white uppercase truncate">{getLeaderboardTeamLabel(matchRunnerUp, projectPlayers)}</h3>
+                                    </div>
+                                    <span className="text-[10px] font-black text-zinc-400 shrink-0">+{scoringRules[1] ?? 0} PTS</span>
+                                  </div>
+                                )}
                                 <div className="space-y-2 pt-4 border-t border-white/5">
                                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                                        <span className="text-zinc-500">Placement Pts</span>
+                                        <span className="text-zinc-500">#1 Placement Pts</span>
                                         <span className="text-[#ccff00]">+{scoringRules[0]}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                                        <span className="text-zinc-500">Total Kills</span>
-                                        <span className="text-white">{matchWinner?.playerKills.reduce((a,b)=>a+b,0)}</span>
+                                        <span className="text-zinc-500">#1 Match Kills</span>
+                                        <span className="text-white">{matchWinnerCandidate ? totalTeamKills(matchWinnerCandidate) : 0}</span>
                                     </div>
                                 </div>
                             </div>

@@ -1166,7 +1166,17 @@ const Dashboard: React.FC<DashboardProps> = ({
             }
         }
 
-        if (selectedGame === 'pubg') return <PubgMobileView {...commonProps} globalLogo={globalLogo} />;
+        const deployProject = isDeployingToProject
+          ? projects.find((p) => p.id === isDeployingToProject)
+          : null;
+        if (selectedGame === 'pubg')
+          return (
+            <PubgMobileView
+              {...commonProps}
+              globalLogo={globalLogo}
+              projectPlayers={deployProject?.players ?? []}
+            />
+          );
         if (selectedGame === 'mlbb') return <MobileLegendsView {...commonProps} />;
         if (selectedGame === 'val') return <ValorantView {...commonProps} />;
         if (selectedGame === 'ff') return <FreeFireView {...commonProps} />;
