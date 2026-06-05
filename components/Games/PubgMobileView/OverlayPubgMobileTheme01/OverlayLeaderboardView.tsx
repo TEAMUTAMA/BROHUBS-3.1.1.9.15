@@ -357,6 +357,8 @@ const ElimBannerLayoutInput = ({
   const onChangeRef = useRef(onChange);
   const draftRef = useRef(Number.isFinite(value) ? value : 0);
   const wheelBurstRef = useRef(false);
+  /** Cegah useEffect sync draft ke value lama saat scroll baru berhenti */
+  const wheelSettlingRef = useRef(false);
   const focusedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const wheelEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -398,7 +400,7 @@ const ElimBannerLayoutInput = ({
       return;
     }
 
-    if (focusedRef.current || wheelBurstRef.current) return;
+    if (focusedRef.current || wheelBurstRef.current || wheelSettlingRef.current) return;
 
     // Preview Sementara: sync draft setelah persist (bukan saat sedang edit)
     if (previewMode) {
@@ -424,12 +426,23 @@ const ElimBannerLayoutInput = ({
   }, []);
 
   const endWheelBurst = useCallback(() => {
-    wheelBurstRef.current = false;
+    const next = draftRef.current;
+    wheelSettlingRef.current = true;
+    commitToParent(next);
     setWheelTuning(false);
-    if (previewMode) {
-      onEditCompleteRef.current?.();
+    if (!previewMode) {
+      wheelBurstRef.current = false;
+      wheelSettlingRef.current = false;
+      return;
     }
-  }, [setWheelTuning, previewMode]);
+    requestAnimationFrame(() => {
+      onEditCompleteRef.current?.();
+      requestAnimationFrame(() => {
+        wheelBurstRef.current = false;
+        wheelSettlingRef.current = false;
+      });
+    });
+  }, [commitToParent, setWheelTuning, previewMode]);
 
   const bumpByWheel = useCallback(
     (delta: number) => {
@@ -446,7 +459,7 @@ const ElimBannerLayoutInput = ({
       if (wheelEndTimerRef.current) {
         clearTimeout(wheelEndTimerRef.current);
       }
-      wheelEndTimerRef.current = setTimeout(endWheelBurst, 150);
+      wheelEndTimerRef.current = setTimeout(endWheelBurst, 200);
     },
     [endWheelBurst, setWheelTuning]
   );
@@ -473,6 +486,10 @@ const ElimBannerLayoutInput = ({
       e.stopPropagation();
       if (previewMode && document.activeElement !== element) {
         element.focus({ preventScroll: true });
+        if (!focusedRef.current) {
+          focusedRef.current = true;
+          setFocusTuning(true);
+        }
       }
       const step = e.shiftKey ? 10 : 1;
       const delta = (e.deltaY > 0 ? -1 : 1) * step;
@@ -491,7 +508,7 @@ const ElimBannerLayoutInput = ({
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       if (wheelEndTimerRef.current) clearTimeout(wheelEndTimerRef.current);
     };
-  }, [bumpByWheel, previewMode]);
+  }, [bumpByWheel, previewMode, setFocusTuning]);
 
   const displayValue = editingText ?? String(draft);
 
@@ -515,6 +532,7 @@ const ElimBannerLayoutInput = ({
           wheelEndTimerRef.current = null;
         }
         wheelBurstRef.current = false;
+        wheelSettlingRef.current = false;
 
         const raw = (editingTextRef.current ?? String(draftRef.current)).trim();
         let next = draftRef.current;
