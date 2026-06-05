@@ -13,6 +13,10 @@ interface AssetViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole?: 'admin' | 'member';
   memberPackage?: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 const AssetView: React.FC<AssetViewProps> = ({
@@ -24,7 +28,11 @@ const AssetView: React.FC<AssetViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole = 'member',
-  memberPackage = 'BASIC'
+  memberPackage = 'BASIC',
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
   const [localAssets, setLocalAssets] = useState<Asset[]>(initialAssets.map(a => ({
     ...a,
@@ -53,14 +61,43 @@ const AssetView: React.FC<AssetViewProps> = ({
       </div>
 
       {/* Breadcrumbs */}
-      <div className="flex items-center gap-4 mb-12">
-        <button 
-          onClick={onBackToHub}
-          className="bg-white/5 text-gray-400 border border-white/10 px-4 py-2 rounded-lg font-black text-[10px] tracking-[0.2em] uppercase hover:bg-white/10 hover:text-white transition-all"
-        >
-          GAME HUB
-        </button>
-        <span className="text-white/20 text-[10px] font-black">/</span>
+      <div className="flex items-center gap-4 mb-12 flex-wrap">
+        {isDeployMode ? (
+          <>
+            {onBackToTerminal && (
+              <>
+                <button 
+                  onClick={onBackToTerminal}
+                  className="bg-white/5 text-gray-400 border border-white/10 px-4 py-2 rounded-lg font-black text-[10px] tracking-[0.2em] uppercase hover:bg-white/10 hover:text-white transition-all"
+                >
+                  TERMINAL
+                </button>
+                <span className="text-white/20 text-[10px] font-black">/</span>
+              </>
+            )}
+            {onBackToProject && (
+              <>
+                <button 
+                  onClick={onBackToProject}
+                  className="bg-white/5 text-gray-400 border border-white/10 px-4 py-2 rounded-lg font-black text-[10px] tracking-[0.2em] uppercase hover:bg-white/10 hover:text-white transition-all"
+                >
+                  PROJECT
+                </button>
+                <span className="text-white/20 text-[10px] font-black">/</span>
+              </>
+            )}
+          </>
+        ) : (
+          <button 
+            onClick={onBackToHub}
+            className="bg-white/5 text-gray-400 border border-white/10 px-4 py-2 rounded-lg font-black text-[10px] tracking-[0.2em] uppercase hover:bg-white/10 hover:text-white transition-all"
+          >
+            GAME HUB
+          </button>
+        )}
+        {!isDeployMode && (
+          <span className="text-white/20 text-[10px] font-black">/</span>
+        )}
         <button 
           onClick={onBackToGame}
           className="bg-white/5 text-gray-400 border border-white/10 px-4 py-2 rounded-lg font-black text-[10px] tracking-[0.2em] uppercase hover:bg-white/10 hover:text-white transition-all"
@@ -99,6 +136,7 @@ const AssetView: React.FC<AssetViewProps> = ({
                     memberTier={memberPackage}
                     onToggleRelease={handleToggleRelease}
                     onSetTier={handleSetTier}
+                    isDeployed={isDeployMode && deployedAssetIds.includes(asset.id)}
                 />
             ))
         ) : (

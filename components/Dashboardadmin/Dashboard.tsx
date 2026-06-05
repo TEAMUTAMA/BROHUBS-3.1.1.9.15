@@ -489,7 +489,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (p.id === isDeployingToProject) {
             const currentAssets = p.deployedAssets || [];
             if (currentAssets.find(a => a.id === asset.id)) {
-                window.alert("ASSET ALREADY DEPLOYED TO THIS PROJECT.");
                 return p;
             }
             const updated = { ...p, deployedAssets: [...currentAssets, asset] };
@@ -499,11 +498,18 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
         return p;
     }));
+  };
 
+  const handleExitDeployMode = () => {
     setIsDeployingToProject(null);
     setSelectedGame(null);
     setSelectedTheme(null);
-    setActiveTab('PROJECTS');
+    setSelectedAsset(null);
+  };
+
+  const handleBackToTerminalFromDeploy = () => {
+    handleExitDeployMode();
+    setActiveProject(null);
   };
 
   const handleRemoveAssetFromProject = (projectId: string, assetId: string) => {
@@ -1130,8 +1136,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
 
     if (activeTab === 'PROJECTS') {
+        const deployProject = isDeployingToProject
+          ? projects.find((p) => p.id === isDeployingToProject)
+          : null;
+
         const commonProps = {
-            onBack: () => { setSelectedGame(null); setSelectedTheme(null); },
+            onBack: () => {
+              if (isDeployingToProject) {
+                handleExitDeployMode();
+                return;
+              }
+              setSelectedGame(null);
+              setSelectedTheme(null);
+            },
             themes: themes,
             setThemes: setThemes,
             onSelectTheme: setSelectedTheme,
@@ -1141,7 +1158,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             onPreviewAsset: setPreviewAsset,
             userRole: userRole,
             memberPackage: userRole === 'admin' ? adminTier : (getActiveMember()?.package || "BASIC"),
-            adminTierOverride: userRole === 'admin' ? adminTier : undefined
+            adminTierOverride: userRole === 'admin' ? adminTier : undefined,
+            isDeployMode: !!isDeployingToProject,
+            deployedAssetIds: deployProject?.deployedAssets?.map((a) => a.id) ?? [],
+            onBackToProject: handleExitDeployMode,
+            onBackToTerminal: handleBackToTerminalFromDeploy,
         };
 
         if (activeProject && !isDeployingToProject) {
@@ -1149,7 +1170,12 @@ const Dashboard: React.FC<DashboardProps> = ({
             <MemberProjectDetailsView 
               project={activeProject} 
               onBack={() => setActiveProject(null)} 
-              onDeployNode={() => setIsDeployingToProject(activeProject.id)}
+              onDeployNode={() => {
+                setIsDeployingToProject(activeProject.id);
+                setSelectedGame(activeProject.gameId);
+                setSelectedTheme(null);
+                setSelectedAsset(null);
+              }}
               onRemoveAsset={(assetId) => handleRemoveAssetFromProject(activeProject.id, assetId)}
               onOpenAsset={setSelectedAsset}
               onUpdateProject={handleUpdateProject}
@@ -1157,18 +1183,6 @@ const Dashboard: React.FC<DashboardProps> = ({
           );
         }
 
-        if (isDeployingToProject) {
-            const project = projects.find(p => p.id === isDeployingToProject);
-            if (project) {
-                if (!selectedGame) {
-                    setSelectedGame(project.gameId);
-                }
-            }
-        }
-
-        const deployProject = isDeployingToProject
-          ? projects.find((p) => p.id === isDeployingToProject)
-          : null;
         if (selectedGame === 'pubg')
           return (
             <PubgMobileView

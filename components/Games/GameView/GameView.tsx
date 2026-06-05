@@ -288,6 +288,12 @@ interface GameViewProps {
   userRole: 'admin' | 'member';
   memberPackage?: string;
   adminTierOverride?: 'BASIC' | 'PREMIUM' | 'ULTIMATE';
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
+  onSelectAsset?: (asset: Asset) => void;
+  onPreviewAsset?: (asset: Asset) => void;
 }
 
 const GameView: React.FC<GameViewProps> = ({
@@ -299,7 +305,13 @@ const GameView: React.FC<GameViewProps> = ({
   selectedTheme,
   userRole,
   memberPackage = 'BASIC',
-  adminTierOverride
+  adminTierOverride,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
+  onSelectAsset,
+  onPreviewAsset,
 }) => {
 
   const filteredThemes = themes.filter(t => t.gameId === selectedGame || t.gameId === selectedGame.toLowerCase());
@@ -344,7 +356,14 @@ const GameView: React.FC<GameViewProps> = ({
               assets={genericAssets}
               onBackToGame={() => onSelectTheme(null as any)}
               onBackToHub={onBack}
-              onSelectAsset={() => {}} 
+              onSelectAsset={onSelectAsset ?? (() => {})}
+              onPreviewAsset={onPreviewAsset}
+              userRole={userRole}
+              memberPackage={memberPackage}
+              isDeployMode={isDeployMode}
+              deployedAssetIds={deployedAssetIds}
+              onBackToProject={onBackToProject}
+              onBackToTerminal={onBackToTerminal}
           />
       );
   }

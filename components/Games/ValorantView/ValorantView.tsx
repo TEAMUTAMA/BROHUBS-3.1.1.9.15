@@ -15,6 +15,10 @@ interface ValorantViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole: 'admin' | 'member';
   memberPackage: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 const VALORANT_ASSETS: Asset[] = [
@@ -32,7 +36,11 @@ const ValorantView: React.FC<ValorantViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole,
-  memberPackage
+  memberPackage,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
   
   const valThemes = themes.filter(t => t.gameId === 'val');
@@ -49,6 +57,10 @@ const ValorantView: React.FC<ValorantViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
       />
     );
   }

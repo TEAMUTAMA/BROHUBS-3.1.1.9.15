@@ -9,7 +9,8 @@ import {
   Unlock,
   ChevronRight,
   Eye,
-  Plus
+  Plus,
+  Check
 } from 'lucide-react';
 import { Asset, AccessTier } from '../types';
 
@@ -22,6 +23,7 @@ interface AssetCardProps {
   onToggleRelease?: (id: string) => void;
   onSetTier?: (id: string, tier: AccessTier) => void;
   onPricingOpen?: () => void;
+  isDeployed?: boolean;
 }
 
 export const AssetCard: React.FC<AssetCardProps> = ({ 
@@ -33,6 +35,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   onToggleRelease,
   onSetTier,
   onPricingOpen,
+  isDeployed = false,
 }) => {
   const [isAdminToolOpen, setIsAdminToolOpen] = useState(false);
   // ... (rest of the component)
@@ -46,6 +49,8 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   };
 
   const isLocked = !hasAccess();
+  const isAlreadyInProject = userRole === 'member' && isDeployed;
+  const addDisabled = isLocked || isAlreadyInProject;
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (isAdminToolOpen) return;
@@ -192,16 +197,19 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                         <Eye size={14} /> PREVIEW ASSET
                     </button>
                     <button 
-                        onClick={(e) => { e.stopPropagation(); if(!isLocked) onSelect(asset); else onPricingOpen?.(); }}
+                        onClick={(e) => { e.stopPropagation(); if (!addDisabled) onSelect(asset); else if (isLocked) onPricingOpen?.(); }}
+                        disabled={addDisabled}
                         className={`w-full py-3 rounded-xl border font-black text-[9px] tracking-[0.2em] uppercase transition-all flex items-center justify-center gap-2 shadow-inner
-                        ${isLocked 
-                            ? 'bg-zinc-900 border-white/5 text-zinc-600' 
+                        ${isAlreadyInProject
+                            ? 'bg-zinc-900 border-[#ccff00]/20 text-[#ccff00]/60 cursor-not-allowed'
+                            : isLocked 
+                            ? 'bg-zinc-900 border-white/5 text-zinc-600 cursor-not-allowed' 
                             : 'bg-[#ccff00] border-[#ccff00] text-black hover:scale-[1.02] shadow-[0_0_20px_rgba(204,255,0,0.2)]'
                         }
                         `}
                     >
-                        {isLocked ? <Lock size={12} /> : <Plus size={14} strokeWidth={3} />}
-                        {isLocked ? 'UPGRADE TO ADD' : 'ADD ASSET TO PROJECT'}
+                        {isAlreadyInProject ? <Check size={12} /> : isLocked ? <Lock size={12} /> : <Plus size={14} strokeWidth={3} />}
+                        {isAlreadyInProject ? 'ALREADY IN PROJECT' : isLocked ? 'UPGRADE TO ADD' : 'ADD ASSET TO PROJECT'}
                     </button>
                 </>
             )}

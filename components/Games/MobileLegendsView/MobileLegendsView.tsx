@@ -15,6 +15,10 @@ interface MobileLegendsViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole: 'admin' | 'member';
   memberPackage: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 // Temporary assets list for MLBB
@@ -34,7 +38,11 @@ const MobileLegendsView: React.FC<MobileLegendsViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole,
-  memberPackage
+  memberPackage,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
 
   const mlbbThemes = themes.filter(t => t.gameId === 'mlbb');
@@ -51,6 +59,10 @@ const MobileLegendsView: React.FC<MobileLegendsViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
       />
     );
   }

@@ -41,6 +41,10 @@ interface PubgMobileViewProps {
   globalLogo?: string | null;
   adminTierOverride?: 'BASIC' | 'PREMIUM' | 'ULTIMATE';
   projectPlayers?: PlayerData[];
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 // --- THEME CARD COMPONENT ---
@@ -218,6 +222,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
 
 const PubgMobileView: React.FC<PubgMobileViewProps> = ({
   onBack, themes, setThemes, onSelectTheme, selectedTheme, selectedAsset, onSelectAsset, onPreviewAsset, userRole, memberPackage, globalLogo, adminTierOverride, projectPlayers: projectPlayersProp = [],
+  isDeployMode = false, deployedAssetIds = [], onBackToProject, onBackToTerminal,
 }) => {
   const [activeTab, setActiveTab] = useState<'TEMPLATES' | 'WIDGETS' | 'CONFIG'>('TEMPLATES');
   const [games, setGames] = useState<Game[]>([]);
@@ -315,6 +320,10 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
         />
       );
   }
@@ -323,7 +332,12 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 min-h-full flex flex-col font-sans">
       <div className="relative w-full h-80 rounded-[40px] overflow-hidden mb-8 group shrink-0">
         <div className="absolute inset-0"><img src="https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop" className="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-1000" alt="PUBG Background" /><div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent" /><div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-transparent to-transparent" /></div>
-        <div className="absolute top-6 left-6 z-20"><button onClick={onBack} className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-white transition-colors bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 hover:bg-black/60"><ArrowLeft size={14} /> BACK TO HUB</button></div>
+        <div className="absolute top-6 left-6 z-20 flex items-center gap-2">
+          {isDeployMode && onBackToTerminal && (
+            <button onClick={onBackToTerminal} className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-white transition-colors bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 hover:bg-black/60"><ArrowLeft size={14} /> TERMINAL</button>
+          )}
+          <button onClick={onBack} className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-white transition-colors bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 hover:bg-black/60"><ArrowLeft size={14} /> {isDeployMode ? 'BACK TO PROJECT' : 'BACK TO HUB'}</button>
+        </div>
         <div className="absolute bottom-8 left-8 z-20 max-w-2xl"><div className="flex items-center gap-3 mb-2 animate-in slide-in-from-left-4 duration-500 delay-100"><div className="bg-[#ccff00] text-black text-[10px] font-black px-2 py-0.5 rounded tracking-widest uppercase">OFFICIAL PARTNER</div><div className="bg-amber-500 text-black text-[10px] font-black px-2 py-0.5 rounded tracking-widest uppercase flex items-center gap-1"><Trophy size={10} /> PMPL READY</div></div><h1 className="text-5xl md:text-7xl font-black italic tracking-tighter text-white uppercase leading-none mb-4 drop-shadow-2xl animate-in slide-in-from-left-4 duration-500 delay-200">PUBG <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#ccff00] to-white">MOBILE</span></h1><p className="text-gray-400 text-sm font-medium max-w-lg leading-relaxed animate-in slide-in-from-left-4 duration-500 delay-300">Access the official broadcast toolkit for PUBG Mobile tournaments. Features automated kill feeds, survival status, and map telemetry integration.</p></div>
         <div className="absolute right-8 bottom-8 z-20 flex gap-4 animate-in fade-in duration-700 delay-500 hidden md:flex"><div className="bg-black/60 backdrop-blur-md border border-white/10 p-4 rounded-2xl"><p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">LIVE NODES</p><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[#ccff00] animate-pulse" /><span className="text-xl font-black text-white">842</span></div></div><div className="bg-black/60 backdrop-blur-md border border-white/10 p-4 rounded-2xl"><p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">ACTIVE REGION</p><div className="flex items-center gap-2"><Globe size={14} className="text-blue-500" /><span className="text-xl font-black text-white">GLOBAL</span></div></div></div>
       </div>

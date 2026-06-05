@@ -15,6 +15,10 @@ interface HonorOfKingsViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole: 'admin' | 'member';
   memberPackage: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 const HOK_ASSETS: Asset[] = [
@@ -31,7 +35,11 @@ const HonorOfKingsView: React.FC<HonorOfKingsViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole,
-  memberPackage
+  memberPackage,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
   
   const hokThemes = themes.filter(t => t.gameId === 'hok');
@@ -48,6 +56,10 @@ const HonorOfKingsView: React.FC<HonorOfKingsViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
       />
     );
   }

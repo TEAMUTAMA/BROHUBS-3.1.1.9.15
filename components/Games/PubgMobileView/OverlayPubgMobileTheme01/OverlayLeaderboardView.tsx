@@ -1164,8 +1164,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const elimBannerWheelTuningRef = useRef(false);
   const elimBannerFocusTuningRef = useRef(false);
   const elimBannerPreviewWrapRef = useRef<HTMLDivElement>(null);
-  const elimBannerInlinePreviewWrapRef = useRef<HTMLDivElement>(null);
   const elimBannerTuningLiveRef = useRef<EliminationBannerLayout>(DEFAULT_ELIMINATION_BANNER_LAYOUT);
+  const stagedCompanionPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [frozenStagedElimAlert, setFrozenStagedElimAlert] = useState<TeamEliminationAlert | null>(
     null
   );
@@ -1177,20 +1177,40 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   }, []);
 
   const applyElimBannerPreviewTransform = useCallback((layout: EliminationBannerLayout) => {
-    for (const el of [
-      elimBannerPreviewWrapRef.current,
-      elimBannerInlinePreviewWrapRef.current,
-    ]) {
-      if (el) applyElimBannerTransformToElement(el, layout);
-    }
+    const el = elimBannerPreviewWrapRef.current;
+    if (el) applyElimBannerTransformToElement(el, layout);
   }, []);
+
+  const pushStagedElimBannerToCompanion = useCallback(() => {
+    if (visualOnly || !elimBannerHoldPreview) return;
+    const previewVisual = elimBannerTuningVisualRef.current;
+    notifyCompanionData({
+      assetId: asset.id,
+      data: {
+        BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
+        BROHUBS_LEADERBOARD_VISUAL: previewVisual
+          ? { ...visualConfig, ...previewVisual }
+          : visualConfig,
+      },
+    });
+  }, [asset.id, visualOnly, elimBannerHoldPreview, visualConfig]);
+
+  const scheduleStagedElimBannerCompanionPush = useCallback(() => {
+    if (visualOnly || !elimBannerHoldPreview) return;
+    if (stagedCompanionPushTimerRef.current) return;
+    stagedCompanionPushTimerRef.current = setTimeout(() => {
+      stagedCompanionPushTimerRef.current = null;
+      pushStagedElimBannerToCompanion();
+    }, 120);
+  }, [visualOnly, elimBannerHoldPreview, pushStagedElimBannerToCompanion]);
 
   const applyElimBannerLayoutLive = useCallback(
     (layout: EliminationBannerLayout) => {
       elimBannerTuningLiveRef.current = layout;
       applyElimBannerPreviewTransform(layout);
+      scheduleStagedElimBannerCompanionPush();
     },
-    [applyElimBannerPreviewTransform]
+    [applyElimBannerPreviewTransform, scheduleStagedElimBannerCompanionPush]
   );
 
   const commitElimBannerTuningLayout = useCallback(
@@ -1221,8 +1241,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       const next = mutate(base);
       elimBannerTuningVisualRef.current = next;
       bumpElimBannerPreview();
+      scheduleStagedElimBannerCompanionPush();
     },
-    [visualConfig, bumpElimBannerPreview]
+    [visualConfig, bumpElimBannerPreview, scheduleStagedElimBannerCompanionPush]
   );
 
   const patchElimBannerVisualField = useCallback(
@@ -1273,7 +1294,23 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         stagedElimCompanionPushedRef.current = false;
         setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
         setElimBannerHoldPreview(true);
+        if (!visualOnly) {
+          const previewVisual = elimBannerTuningVisualRef.current;
+          notifyCompanionData({
+            assetId: asset.id,
+            data: {
+              BROHUBS_ELIMINATION_BANNER_LAYOUT: seed,
+              BROHUBS_LEADERBOARD_VISUAL: previewVisual
+                ? { ...visualConfig, ...previewVisual }
+                : visualConfig,
+            },
+          });
+        }
         return;
+      }
+      if (stagedCompanionPushTimerRef.current) {
+        clearTimeout(stagedCompanionPushTimerRef.current);
+        stagedCompanionPushTimerRef.current = null;
       }
       const tuning = elimBannerTuningLayoutRef.current ?? elimBannerTuningLiveRef.current;
       if (tuning) {
@@ -1295,9 +1332,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       bumpElimBannerPreview,
       clearPreviewEliminationState,
       commitElimBannerVisualDraftToConfig,
+      asset.id,
       elimBannerLayout,
       setElimBannerLayout,
       visualConfig,
+      visualOnly,
     ]
   );
 
@@ -3701,7 +3740,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   1920×1080 · POS X positif = kanan · bukan LAYOUT TRANSFORM leaderboard di atas.
                                   {elimBannerHoldPreview && (
                                     <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
-                                      Preview aktif — arahkan mouse ke kolom angka lalu scroll (Shift = ±10), atau klik lalu ketik angka
+                                      Preview aktif — perubahan langsung ke Monitor Preview / Program &amp; Link Output. Scroll di kolom angka (Shift = ±10) atau klik lalu ketik
                                     </span>
                                   )}
                                 </p>
@@ -3710,51 +3749,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                     <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                 </div>
-                                {elimBannerHoldPreview && (
-                                  <div className="mt-4 rounded-xl border border-[#ccff00]/30 overflow-hidden bg-zinc-950">
-                                    <div className="px-3 py-2 border-b border-[#ccff00]/20 flex items-center justify-between gap-2">
-                                      <span className="text-[7px] font-black text-[#ccff00] uppercase tracking-widest">
-                                        Preview langsung
-                                      </span>
-                                      <span className="text-[6px] text-zinc-500 normal-case">
-                                        Canvas 1920×1080 · monitor kanan ikut update
-                                      </span>
-                                    </div>
-                                    <div
-                                      className="relative w-full h-[210px] overflow-hidden"
-                                      style={{
-                                        backgroundColor: '#050505',
-                                        backgroundImage:
-                                          'conic-gradient(#0a0a0a 90deg, #050505 90deg 180deg, #0a0a0a 180deg 270deg, #050505 270deg)',
-                                        backgroundSize: '18px 18px',
-                                      }}
-                                    >
-                                      <div className="absolute left-1/2 top-0 -translate-x-1/2">
-                                        <div
-                                          style={{
-                                            width: 1920,
-                                            height: 1080,
-                                            transform: `scale(${210 / 1080})`,
-                                            transformOrigin: 'top center',
-                                          }}
-                                          className="relative"
-                                        >
-                                          <div
-                                            ref={elimBannerInlinePreviewWrapRef}
-                                            className="absolute z-[10] pointer-events-none"
-                                            style={elimBannerPositionStyle}
-                                          >
-                                            <TeamEliminatedBanner
-                                              alert={displayElimAlert}
-                                              visual={elimBannerVisual}
-                                              tuningPreview
-                                            />
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
                                 <div className="mt-4 pt-4 border-t border-white/5">
                                   <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
                                     <Type size={12} className="text-[#ccff00]" />
@@ -3801,7 +3795,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                       : 'Custom Image — # dan TAG (ELIMINATED ada di gambar PNG). Font di overlay sinkron dengan kontrol di bawah.'}
                                     {elimBannerHoldPreview && (
                                       <span className="block mt-1 text-[#ccff00]">
-                                        Preview aktif — perubahan langsung terlihat
+                                        Lihat hasil di Monitor Preview / Program atau tab Link Output
                                       </span>
                                     )}
                                   </p>
@@ -4159,7 +4153,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                           {ELIMINATION_BANNER_FULL_LAYOUT_NOTE}
                                           {elimBannerHoldPreview && (
                                             <span className="block mt-1 text-[#ccff00]">
-                                              Scroll di atas kolom angka (Shift = ±10) atau klik lalu ketik.
+                                              Perubahan langsung ke asset di monitor &amp; Link Output — scroll (Shift = ±10) atau ketik.
                                             </span>
                                           )}
                                         </p>

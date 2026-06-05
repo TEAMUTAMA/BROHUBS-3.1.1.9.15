@@ -15,6 +15,10 @@ interface FreeFireViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole: 'admin' | 'member';
   memberPackage: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 const FF_ASSETS: Asset[] = [
@@ -31,7 +35,11 @@ const FreeFireView: React.FC<FreeFireViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole,
-  memberPackage
+  memberPackage,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
   
   const ffThemes = themes.filter(t => t.gameId === 'ff');
@@ -48,6 +56,10 @@ const FreeFireView: React.FC<FreeFireViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
       />
     );
   }

@@ -15,6 +15,10 @@ interface Dota2ViewProps {
   onPreviewAsset?: (asset: Asset) => void;
   userRole: 'admin' | 'member';
   memberPackage: string;
+  isDeployMode?: boolean;
+  deployedAssetIds?: string[];
+  onBackToProject?: () => void;
+  onBackToTerminal?: () => void;
 }
 
 const DOTA_ASSETS: Asset[] = [
@@ -31,7 +35,11 @@ const Dota2View: React.FC<Dota2ViewProps> = ({
   onSelectAsset,
   onPreviewAsset,
   userRole,
-  memberPackage
+  memberPackage,
+  isDeployMode = false,
+  deployedAssetIds = [],
+  onBackToProject,
+  onBackToTerminal,
 }) => {
   
   const dotaThemes = themes.filter(t => t.gameId === 'dota');
@@ -48,6 +56,10 @@ const Dota2View: React.FC<Dota2ViewProps> = ({
           onPreviewAsset={onPreviewAsset}
           userRole={userRole}
           memberPackage={memberPackage}
+          isDeployMode={isDeployMode}
+          deployedAssetIds={deployedAssetIds}
+          onBackToProject={onBackToProject}
+          onBackToTerminal={onBackToTerminal}
       />
     );
   }
