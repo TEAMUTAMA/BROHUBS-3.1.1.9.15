@@ -140,6 +140,7 @@ import {
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 import { notifyCompanionData } from '@/lib/overlayData';
 import TeamEliminatedBanner from '../TeamEliminatedBanner';
+import { FinalFourTeamCard } from '../FinalFourTeamCard';
 import { useOverlayFonts } from '../useEliminationBannerFonts';
 import OverlayFontFamilySelect from '../../../OverlayFontFamilySelect';
 import {
@@ -267,12 +268,12 @@ const ELIMINATED_POPUP_EASE_IN: [number, number, number, number] = [0.22, 1, 0.3
 const ELIMINATED_POPUP_EASE_OUT: [number, number, number, number] = [0.33, 1, 0.68, 1];
 const ELIMINATED_POPUP_HOLD_MS = 3400;
 
-/** Saat tersisa tepat 4 tim hidup — klasemen kanan keluar, bar 4 tim dari atas */
+/** Final Four: aktif saat 4 tim tersisa, lanjut 3→2 (tengah), tanpa banner elim & klasemen kanan */
 const FINAL_FOUR_ALIVE_COUNT = 4;
+const FINAL_FOUR_MIN_ALIVE_COUNT = 2;
 const FINAL_FOUR_TOP_OFFSET_PX = 56;
 const FINAL_FOUR_PANEL_EXIT_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const FINAL_FOUR_ENTER_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-
 const ScrollableInput = ({
   value,
   onChange,
@@ -730,6 +731,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   );
   const eliminationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eliminationQueueRef = useRef<TeamEliminationAlert[]>([]);
+  const finalFourPhaseActiveRef = useRef(false);
+  const [finalFourPhaseActive, setFinalFourPhaseActive] = useState(false);
   const eliminationShowingRef = useRef(false);
   const seenEliminationsRef = useRef<Set<string>>(new Set());
   const eliminationsInitializedRef = useRef(false);
@@ -1067,8 +1070,23 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [teams]
   );
   const survivingMatchCount = survivingMatchTeams.length;
-  /** Match berjalan & tepat 4 tim masih hidup — bar final 4 dari atas, klasemen kanan keluar */
-  const showFinalFourOverlay = survivingMatchCount === FINAL_FOUR_ALIVE_COUNT;
+
+  useEffect(() => {
+    if (survivingMatchCount === FINAL_FOUR_ALIVE_COUNT) {
+      finalFourPhaseActiveRef.current = true;
+      setFinalFourPhaseActive(true);
+    }
+    if (survivingMatchCount < FINAL_FOUR_MIN_ALIVE_COUNT) {
+      finalFourPhaseActiveRef.current = false;
+      setFinalFourPhaseActive(false);
+    }
+  }, [survivingMatchCount]);
+
+  /** Fase Final Four (4→3→2): bar atas tetap tengah, tanpa klasemen kanan & banner elim */
+  const showFinalFourOverlay =
+    finalFourPhaseActive &&
+    survivingMatchCount >= FINAL_FOUR_MIN_ALIVE_COUNT &&
+    survivingMatchCount <= FINAL_FOUR_ALIVE_COUNT;
   /** Bisa lanjut match berikutnya jika tersisa ≤2 tim tanpa placement (WWCD / top 2) */
   const isMatchReadyToEnd = contentionCount <= 2;
   const matchWinnerCandidate = useMemo(() => {
@@ -1150,18 +1168,27 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const queueTeamEliminationBanner = useCallback(
     (teamIndex: number, placementRank: number, teamsSnapshot: Team[]) => {
-      const alert = buildTeamEliminationAlert(teamIndex, placementRank, teamsSnapshot);
-      if (!alert) return;
-
       const dedupeKey = `${teamIndex}-${placementRank}`;
       if (seenEliminationsRef.current.has(dedupeKey)) return;
       seenEliminationsRef.current.add(dedupeKey);
 
+      if (finalFourPhaseActiveRef.current) {
+        return;
+      }
+
+      const alert = buildTeamEliminationAlert(teamIndex, placementRank, teamsSnapshot);
+      if (!alert) return;
+
       eliminationQueueRef.current.push(alert);
       playNextEliminationBanner();
     },
-    [buildTeamEliminationAlert, playNextEliminationBanner]
+    [buildTeamEliminationBanner, playNextEliminationBanner]
   );
+
+  const resetFinalFourPhase = useCallback(() => {
+    finalFourPhaseActiveRef.current = false;
+    setFinalFourPhaseActive(false);
+  }, []);
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
@@ -1323,6 +1350,26 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const displayElimAlert = elimBannerHoldPreview
     ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
     : eliminationAlert;
+
+  const showEliminationBanner =
+    elimBannerHoldPreview || (!showFinalFourOverlay && displayElimAlert !== null);
+
+  useEffect(() => {
+    if (!showFinalFourOverlay || elimBannerHoldPreview) return;
+    if (eliminationClearTimerRef.current) {
+      clearTimeout(eliminationClearTimerRef.current);
+      eliminationClearTimerRef.current = null;
+    }
+    eliminationShowingRef.current = false;
+    eliminationQueueRef.current = [];
+    setEliminationAlert(null);
+    pushEliminationToCompanion(null);
+  }, [
+    showFinalFourOverlay,
+    elimBannerHoldPreview,
+    pushEliminationToCompanion,
+    setEliminationAlert,
+  ]);
 
   const isElimBannerTuningPreview =
     elimBannerHoldPreview ||
@@ -1891,6 +1938,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     seenEliminationsRef.current.clear();
     eliminationQueueRef.current = [];
     eliminationShowingRef.current = false;
+    resetFinalFourPhase();
     if (!visualOnly) {
       setFraggers([
         { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
@@ -1923,6 +1971,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         seenEliminationsRef.current.clear();
         eliminationQueueRef.current = [];
         eliminationShowingRef.current = false;
+        resetFinalFourPhase();
         setFraggers([
           { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
           { rank: 2, name: 'PLAYER 2', team: 'TEAM B', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
@@ -1963,6 +2012,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     seenEliminationsRef.current.clear();
     eliminationQueueRef.current = [];
     eliminationShowingRef.current = false;
+    resetFinalFourPhase();
   };
 
   const confirmEndMatchExecution = () => {
@@ -2142,16 +2192,29 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const finalFourTeamsData = useMemo(() => {
     if (!showFinalFourOverlay) return [];
+    const totalAlivePlayers = survivingMatchTeams.reduce(
+      (sum, t) => sum + countAlivePlayers(t.status),
+      0
+    );
     return survivingMatchTeams
       .map((t) => {
         const overallIdx = sortedPreviewTeams.findIndex((st) => st.rank === t.rank);
+        const alivePlayers = countAlivePlayers(t.status);
+        const wwcdPotentialPct =
+          totalAlivePlayers > 0 ? (alivePlayers / totalAlivePlayers) * 100 : 0;
+
+        const teamAbbreviation = getLeaderboardTeamLabel(t, projectPlayers);
+        const teamFullName = t.team.trim() || teamAbbreviation;
         return {
           rank: t.rank,
-          teamName: t.team.trim() || getLeaderboardTeamLabel(t, projectPlayers),
+          teamAbbreviation,
+          teamName: teamFullName,
           teamLogo: resolveLeaderboardTeamLogo(t, projectPlayers),
-          alivePlayers: countAlivePlayers(t.status),
+          alivePlayers,
+          playerStatus: [...t.status],
           wwcdPosition: overallIdx >= 0 ? overallIdx + 1 : null,
           totalWwcds: t.totalWwcds,
+          wwcdPotentialPct,
         };
       })
       .sort((a, b) => (a.wwcdPosition ?? 99) - (b.wwcdPosition ?? 99));
@@ -2634,110 +2697,38 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         }}
       >
         <div
-          className="flex flex-row items-stretch justify-center gap-4 w-full max-w-[1680px]"
+          className="flex flex-row items-stretch justify-center gap-5 w-full max-w-[1680px]"
           style={{ scale: layoutConfig.scale / 100, transformOrigin: 'top center' }}
         >
-          {finalFourTeamsData.map((entry, idx) => (
-            <motion.div
-              key={entry.rank}
-              custom={idx}
-              initial={{ y: -72, opacity: 0, scale: 0.92 }}
-              animate={{
-                y: 0,
-                opacity: 1,
-                scale: 1,
-                transition: {
-                  delay: 0.12 + idx * 0.07,
-                  duration: 0.55,
-                  ease: FINAL_FOUR_ENTER_EASE,
-                },
-              }}
-              exit={{
-                y: -48,
-                opacity: 0,
-                scale: 0.94,
-                transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
-              }}
-              className="flex-1 min-w-0 max-w-[400px] flex flex-col items-center rounded-2xl border-2 border-black/20 shadow-2xl overflow-hidden"
-              style={resolveLeaderboardSurfaceStyle(
-                visualConfig.headerBg,
-                visualConfig.leaderboardPanelBgImage,
-                visualConfig
-              )}
-            >
-              <div
-                className="w-full flex flex-col items-center px-4 pt-5 pb-4 gap-3"
-                style={resolveLeaderboardSurfaceStyle(
-                  idx % 2 === 0 ? visualConfig.rowEvenBg : visualConfig.rowOddBg,
-                  idx % 2 === 0 ? visualConfig.rowEvenBgImage : visualConfig.rowOddBgImage,
-                  visualConfig
-                )}
+          <AnimatePresence mode="popLayout">
+            {finalFourTeamsData.map((entry, idx) => (
+              <motion.div
+                key={entry.rank}
+                layout
+                custom={idx}
+                initial={{ y: -72, opacity: 0, scale: 0.92 }}
+                animate={{
+                  y: 0,
+                  opacity: 1,
+                  scale: 1,
+                  transition: {
+                    delay: 0.12 + idx * 0.07,
+                    duration: 0.55,
+                    ease: FINAL_FOUR_ENTER_EASE,
+                  },
+                }}
+                exit={{
+                  y: -48,
+                  opacity: 0,
+                  scale: 0.94,
+                  transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+                }}
+                className="shrink-0"
               >
-                <div
-                  className="flex items-center justify-center overflow-hidden shrink-0 rounded-xl border border-black/10 shadow-md bg-white/5"
-                  style={{
-                    width: `${Math.max(layoutConfig.logoSize + 16, 72)}px`,
-                    height: `${Math.max(layoutConfig.logoSize + 16, 72)}px`,
-                  }}
-                >
-                  {entry.teamLogo ? (
-                    <img
-                      src={entry.teamLogo}
-                      alt={entry.teamName}
-                      className="w-full h-full object-contain p-1.5"
-                    />
-                  ) : (
-                    <Shield
-                      size={Math.max(layoutConfig.logoSize, 40)}
-                      className="opacity-25 text-black"
-                    />
-                  )}
-                </div>
-
-                <span
-                  className="font-[900] uppercase text-center leading-tight tracking-wide w-full truncate px-1"
-                  style={{
-                    fontSize: `${Math.max(layoutConfig.fontSize + 2, 14)}px`,
-                    color: visualConfig.teamNameColor,
-                  }}
-                  title={entry.teamName}
-                >
-                  {entry.teamName}
-                </span>
-
-                <div className="flex items-center justify-center gap-6 w-full pt-1 border-t border-black/10">
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span
-                      className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70"
-                      style={{ color: visualConfig.headerText }}
-                    >
-                      Alive
-                    </span>
-                    <span
-                      className="text-2xl font-[1000] tabular-nums leading-none"
-                      style={{ color: visualConfig.statusAlive }}
-                    >
-                      {entry.alivePlayers}
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span
-                      className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70"
-                      style={{ color: visualConfig.headerText }}
-                    >
-                      Posisi WWCD
-                    </span>
-                    <span
-                      className="text-2xl font-[1000] tabular-nums leading-none"
-                      style={{ color: visualConfig.pointsColor }}
-                    >
-                      #{entry.wwcdPosition ?? '—'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
+                <FinalFourTeamCard entry={entry} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       </div>
     );
@@ -2789,7 +2780,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           />
         )}
 
-        {elimBannerPreviewNode}
+        {showEliminationBanner && elimBannerPreviewNode}
 
         <AnimatePresence initial={false}>
           {showOverlay && !showFinalFourOverlay && leaderboardOverlayPanel && (
@@ -2843,6 +2834,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       finalFourOverlayPanel,
       showOverlay,
       showFinalFourOverlay,
+      showEliminationBanner,
     ]
   );
 
@@ -3012,8 +3004,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 ? 'READY: WINNER FOUND'
                                                 : contentionCount === 2
                                                   ? 'READY: TOP 2 — LANJUT MATCH'
-                                                  : survivingMatchCount === FINAL_FOUR_ALIVE_COUNT
-                                                    ? 'LIVE: FINAL 4 — BAR ATAS'
+                                                  : showFinalFourOverlay
+                                                    ? `LIVE: FINAL ${survivingMatchCount} — BAR ATAS`
                                                     : `LIVE: ${contentionCount} TIM TANPA PLACEMENT`}
                                         </span>
                                     </div>
