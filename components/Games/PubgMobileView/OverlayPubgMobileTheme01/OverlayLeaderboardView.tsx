@@ -340,6 +340,7 @@ const ElimBannerLayoutInput = ({
   previewMode = false,
   onWheelTuningChange,
   onFocusTuningChange,
+  onEditComplete,
   className,
 }: {
   value: number;
@@ -348,6 +349,8 @@ const ElimBannerLayoutInput = ({
   previewMode?: boolean;
   onWheelTuningChange?: (active: boolean) => void;
   onFocusTuningChange?: (active: boolean) => void;
+  /** Preview Sementara — simpan ke storage setelah selesai edit */
+  onEditComplete?: () => void;
   className?: string;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -362,7 +365,9 @@ const ElimBannerLayoutInput = ({
   const [editingText, setEditingText] = useState<string | null>(null);
   const editingTextRef = useRef<string | null>(null);
 
+  const onEditCompleteRef = useRef(onEditComplete);
   onChangeRef.current = onChange;
+  onEditCompleteRef.current = onEditComplete;
   draftRef.current = draft;
 
   const setWheelTuning = useCallback(
@@ -421,7 +426,10 @@ const ElimBannerLayoutInput = ({
   const endWheelBurst = useCallback(() => {
     wheelBurstRef.current = false;
     setWheelTuning(false);
-  }, [setWheelTuning]);
+    if (previewMode) {
+      onEditCompleteRef.current?.();
+    }
+  }, [setWheelTuning, previewMode]);
 
   const bumpByWheel = useCallback(
     (delta: number) => {
@@ -518,9 +526,10 @@ const ElimBannerLayoutInput = ({
         editingTextRef.current = null;
         setEditingText(null);
 
-        // Commit nilai dulu, baru akhiri tuning — cegah flush menulis angka lama
-        setWheelTuning(false);
+        // Commit nilai dulu, akhiri tuning, lalu persist sekali
         setFocusTuning(false);
+        setWheelTuning(false);
+        onEditCompleteRef.current?.();
       }}
       onChange={(e) => {
         const raw = e.target.value;
@@ -545,6 +554,7 @@ const ElimNumberInput = ({
   previewMode = false,
   onWheelTuningChange,
   onFocusTuningChange,
+  onEditComplete,
 }: {
   value: number;
   onChange: (val: number) => void;
@@ -552,6 +562,7 @@ const ElimNumberInput = ({
   previewMode?: boolean;
   onWheelTuningChange?: (active: boolean) => void;
   onFocusTuningChange?: (active: boolean) => void;
+  onEditComplete?: () => void;
 }) =>
   previewMode ? (
     <ElimBannerLayoutInput
@@ -561,6 +572,7 @@ const ElimNumberInput = ({
       className={className}
       onWheelTuningChange={onWheelTuningChange}
       onFocusTuningChange={onFocusTuningChange}
+      onEditComplete={onEditComplete}
     />
   ) : (
     <ScrollableInput value={value} onChange={onChange} className={className} />
@@ -794,6 +806,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const [elimBannerPreviewRevision, setElimBannerPreviewRevision] = useState(0);
   const elimBannerTuningVisualRef = useRef<EliminationBannerVisual | null>(null);
+  /** Draft visual overlay saat Preview Sementara — state agar input tidak stale */
+  const [elimBannerTuningVisual, setElimBannerTuningVisual] =
+    useState<EliminationBannerVisual | null>(null);
   const bumpElimBannerPreview = useCallback(
     () => setElimBannerPreviewRevision((n) => n + 1),
     []
@@ -801,8 +816,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const elimBannerVisual = useMemo(
     () =>
-      elimBannerTuningVisualRef.current ?? pickEliminationBannerVisual(visualConfig),
-    [visualConfig, elimBannerPreviewRevision]
+      elimBannerTuningVisual != null
+        ? elimBannerTuningVisual
+        : pickEliminationBannerVisual(visualConfig),
+    [elimBannerTuningVisual, visualConfig]
   );
 
   const elimBannerTypography = useMemo(
@@ -1233,27 +1250,47 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [applyElimBannerLayoutLive]
   );
 
+  const persistElimBannerVisualDraft = useCallback(
+    (draft?: EliminationBannerVisual) => {
+      const visual = draft ?? elimBannerTuningVisualRef.current;
+      if (!visual) return;
+      setVisualConfig((prev) => ({
+        ...prev,
+        ...visual,
+        elimBannerTypography: visual.elimBannerTypography,
+        elimBannerFullLayout: visual.elimBannerFullLayout,
+      }));
+    },
+    [setVisualConfig]
+  );
+
   const commitElimBannerVisualDraftToConfig = useCallback(() => {
-    const draft = elimBannerTuningVisualRef.current;
-    if (!draft) return;
-    setVisualConfig((prev) => ({
-      ...prev,
-      ...draft,
-      elimBannerTypography: draft.elimBannerTypography,
-      elimBannerFullLayout: draft.elimBannerFullLayout,
-    }));
-  }, [setVisualConfig]);
+    persistElimBannerVisualDraft();
+  }, [persistElimBannerVisualDraft]);
 
   const mutateElimBannerVisualDraft = useCallback(
     (mutate: (picked: EliminationBannerVisual) => EliminationBannerVisual) => {
       const base =
-        elimBannerTuningVisualRef.current ?? pickEliminationBannerVisual(visualConfig);
+        elimBannerTuningVisualRef.current ??
+        elimBannerTuningVisual ??
+        pickEliminationBannerVisual(visualConfig);
       const next = mutate(base);
       elimBannerTuningVisualRef.current = next;
+      setElimBannerTuningVisual(next);
       bumpElimBannerPreview();
+      if (!isElimBannerLayoutTuning()) {
+        persistElimBannerVisualDraft(next);
+      }
       scheduleStagedElimBannerCompanionPush();
     },
-    [visualConfig, bumpElimBannerPreview, scheduleStagedElimBannerCompanionPush]
+    [
+      visualConfig,
+      elimBannerTuningVisual,
+      bumpElimBannerPreview,
+      isElimBannerLayoutTuning,
+      persistElimBannerVisualDraft,
+      scheduleStagedElimBannerCompanionPush,
+    ]
   );
 
   const patchElimBannerVisualField = useCallback(
@@ -1279,6 +1316,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   useEffect(() => {
     elimBannerTuningLayoutRef.current = elimBannerTuningLayout;
   }, [elimBannerTuningLayout]);
+
+  useEffect(() => {
+    elimBannerTuningVisualRef.current = elimBannerTuningVisual;
+  }, [elimBannerTuningVisual]);
 
   const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert => {
     if (teams.length === 0) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
@@ -1308,7 +1349,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         const seed = { ...elimBannerLayout };
         setElimBannerTuningLayout(seed);
         elimBannerTuningLiveRef.current = seed;
-        elimBannerTuningVisualRef.current = pickEliminationBannerVisual(visualConfig);
+        const visualSeed = pickEliminationBannerVisual(visualConfig);
+        elimBannerTuningVisualRef.current = visualSeed;
+        setElimBannerTuningVisual(visualSeed);
         bumpElimBannerPreview();
         stagedElimCompanionPushedRef.current = false;
         setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
@@ -1335,8 +1378,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       if (tuning) {
         persistElimBannerLayout(tuning);
       }
-      commitElimBannerVisualDraftToConfig();
+      persistElimBannerVisualDraft();
       elimBannerTuningVisualRef.current = null;
+      setElimBannerTuningVisual(null);
       bumpElimBannerPreview();
       setElimBannerTuningLayout(null);
       elimBannerWheelTuningRef.current = false;
@@ -1350,7 +1394,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       buildStagedElimPreviewAlert,
       bumpElimBannerPreview,
       clearPreviewEliminationState,
-      commitElimBannerVisualDraftToConfig,
+      persistElimBannerVisualDraft,
       asset.id,
       elimBannerLayout,
       persistElimBannerLayout,
@@ -1359,12 +1403,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     ]
   );
 
-  /** Nilai untuk input — state (bukan ref) agar tidak stale; ref dipakai untuk transform DOM realtime */
-  const elimBannerLayoutForInputs = elimBannerHoldPreview
-    ? (elimBannerTuningLayout ?? elimBannerLayout)
+  /** Preview: baca live ref (sync) + state agar input & canvas tidak stale */
+  const effectiveElimBannerLayout = elimBannerHoldPreview
+    ? elimBannerTuningLiveRef.current
     : elimBannerLayout;
-
-  const effectiveElimBannerLayout = elimBannerLayoutForInputs;
 
   useEffect(() => {
     if (!elimBannerHoldPreview) {
@@ -1555,33 +1597,42 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]
   );
 
-  const finalizeElimBannerLayoutEdit = useCallback(() => {
-    if (!elimBannerHoldPreview) return;
-    persistElimBannerLayout(elimBannerTuningLiveRef.current);
-    pushStagedElimBannerToCompanion();
-  }, [elimBannerHoldPreview, persistElimBannerLayout, pushStagedElimBannerToCompanion]);
-
   const handleElimBannerWheelTuning = useCallback(
     (active: boolean) => {
       elimBannerWheelTuningRef.current = active;
       syncElimBannerTuningActive();
-      if (!active) {
-        finalizeElimBannerLayoutEdit();
-      }
     },
-    [syncElimBannerTuningActive, finalizeElimBannerLayoutEdit]
+    [syncElimBannerTuningActive]
   );
 
   const handleElimBannerFocusTuning = useCallback(
     (active: boolean) => {
       elimBannerFocusTuningRef.current = active;
       syncElimBannerTuningActive();
-      if (!active) {
-        finalizeElimBannerLayoutEdit();
-      }
     },
-    [syncElimBannerTuningActive, finalizeElimBannerLayoutEdit]
+    [syncElimBannerTuningActive]
   );
+
+  const finalizeElimBannerTuningEdit = useCallback(() => {
+    if (!elimBannerHoldPreview) return;
+    persistElimBannerLayout(elimBannerTuningLiveRef.current);
+    persistElimBannerVisualDraft(elimBannerTuningVisualRef.current ?? undefined);
+    pushStagedElimBannerToCompanion();
+  }, [
+    elimBannerHoldPreview,
+    persistElimBannerLayout,
+    persistElimBannerVisualDraft,
+    pushStagedElimBannerToCompanion,
+  ]);
+
+  const elimBannerPreviewInputProps = elimBannerHoldPreview
+    ? {
+        previewMode: true as const,
+        onWheelTuningChange: handleElimBannerWheelTuning,
+        onFocusTuningChange: handleElimBannerFocusTuning,
+        onEditComplete: finalizeElimBannerTuningEdit,
+      }
+    : { previewMode: false as const };
 
   const previewEliminationBanner = useCallback(() => {
     if (elimBannerHoldPreview) return;
@@ -3752,9 +3803,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   )}
                                 </p>
                                 <div className="grid grid-cols-3 gap-3">
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ElimBannerLayoutInput {...elimBannerPreviewInputProps} value={effectiveElimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimBannerLayoutInput {...elimBannerPreviewInputProps} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimBannerLayoutInput {...elimBannerPreviewInputProps} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                 </div>
                                 <div className="mt-4 pt-4 border-t border-white/5">
                                   <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
@@ -3820,13 +3871,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                           {ELIMINATION_BANNER_FONT_LABELS[fontKey]}
                                         </label>
                                         <ElimNumberInput
-                                          previewMode={elimBannerHoldPreview}
+                                          {...elimBannerPreviewInputProps}
                                           value={elimBannerTypography[fontKey]}
                                           onChange={(val) =>
                                             patchElimBannerTypography(fontKey, val)
                                           }
-                                          onWheelTuningChange={handleElimBannerWheelTuning}
-                                          onFocusTuningChange={handleElimBannerFocusTuning}
                                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                         />
                                       </div>
@@ -4083,7 +4132,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 Zoom gambar % (utuh)
                                               </label>
                                               <ElimNumberInput
-                                                previewMode={elimBannerHoldPreview}
+                                                {...elimBannerPreviewInputProps}
                                                 value={elimBannerVisual.elimBannerFullImageZoom ?? 100}
                                                 onChange={(val) =>
                                                   patchElimBannerVisualField(
@@ -4091,8 +4140,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                     Math.min(300, Math.max(25, val))
                                                   )
                                                 }
-                                                onWheelTuningChange={handleElimBannerWheelTuning}
-                                                onFocusTuningChange={handleElimBannerFocusTuning}
                                                 className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                               />
                                               <p className="text-[6px] text-zinc-600 normal-case mt-1">
@@ -4108,7 +4155,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                   Posisi gambar X %
                                                 </label>
                                                 <ElimNumberInput
-                                                  previewMode={elimBannerHoldPreview}
+                                                  {...elimBannerPreviewInputProps}
                                                   value={elimBannerVisual.elimBannerFullImagePosX ?? 50}
                                                   onChange={(val) =>
                                                     patchElimBannerVisualField(
@@ -4116,8 +4163,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                       val
                                                     )
                                                   }
-                                                  onWheelTuningChange={handleElimBannerWheelTuning}
-                                                  onFocusTuningChange={handleElimBannerFocusTuning}
                                                   className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                 />
                                               </div>
@@ -4126,7 +4171,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                   Posisi gambar Y %
                                                 </label>
                                                 <ElimNumberInput
-                                                  previewMode={elimBannerHoldPreview}
+                                                  {...elimBannerPreviewInputProps}
                                                   value={elimBannerVisual.elimBannerFullImagePosY ?? 50}
                                                   onChange={(val) =>
                                                     patchElimBannerVisualField(
@@ -4134,8 +4179,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                       val
                                                     )
                                                   }
-                                                  onWheelTuningChange={handleElimBannerWheelTuning}
-                                                  onFocusTuningChange={handleElimBannerFocusTuning}
                                                   className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                 />
                                               </div>
@@ -4158,9 +4201,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                         </h6>
                                         <p className="text-[7px] text-zinc-500 normal-case mb-4 leading-relaxed">
                                           {ELIMINATION_BANNER_FULL_LAYOUT_NOTE}
-                                          {elimBannerHoldPreview && (
+                                          {elimBannerHoldPreview ? (
                                             <span className="block mt-1 text-[#ccff00]">
-                                              Perubahan langsung ke asset di monitor &amp; Link Output — scroll (Shift = ±10) atau ketik.
+                                              Perubahan langsung ke asset di monitor &amp; Link Output — scroll (Shift = ±10) atau ketik. Nilai tersimpan otomatis saat kursor keluar dari kolom.
+                                            </span>
+                                          ) : (
+                                            <span className="block mt-1 text-zinc-500 normal-case">
+                                              Perubahan posisi overlay tersimpan otomatis ke pengaturan project saat selesai mengedit kolom angka.
                                             </span>
                                           )}
                                         </p>
@@ -4227,7 +4274,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                     {label}
                                                   </label>
                                                   <ElimNumberInput
-                                                    previewMode={elimBannerHoldPreview}
+                                                    {...elimBannerPreviewInputProps}
                                                     value={
                                                       prop === 'fontSize' && key === 'placement'
                                                         ? elimBannerTypography.placement
@@ -4248,8 +4295,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                             EliminationBannerFullOverlayLayout[typeof key]
                                                           >)
                                                     }
-                                                    onWheelTuningChange={handleElimBannerWheelTuning}
-                                                    onFocusTuningChange={handleElimBannerFocusTuning}
                                                     className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                                                   />
                                                 </div>
