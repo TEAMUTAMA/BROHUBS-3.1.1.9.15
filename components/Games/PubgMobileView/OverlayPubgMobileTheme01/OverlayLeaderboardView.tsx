@@ -393,10 +393,18 @@ const ElimBannerLayoutInput = ({
       return;
     }
 
-    // Preview Sementara: jangan sync dari parent — value prop sengaja tertinggal saat tuning live
-    if (previewMode) return;
-
     if (focusedRef.current || wheelBurstRef.current) return;
+
+    // Preview Sementara: sync draft setelah persist (bukan saat sedang edit)
+    if (previewMode) {
+      const next = Number.isFinite(value) ? value : 0;
+      if (draftRef.current !== next) {
+        draftRef.current = next;
+        setDraft(next);
+        setEditingText(null);
+      }
+      return;
+    }
     const next = Number.isFinite(value) ? value : 0;
     if (draftRef.current === next) return;
     draftRef.current = next;
@@ -499,20 +507,19 @@ const ElimBannerLayoutInput = ({
           wheelEndTimerRef.current = null;
         }
         wheelBurstRef.current = false;
-        setWheelTuning(false);
+
         const raw = (editingTextRef.current ?? String(draftRef.current)).trim();
+        let next = draftRef.current;
         if (raw !== '' && raw !== '-') {
-          const next = Number(raw);
-          if (Number.isFinite(next)) {
-            commitToParent(next);
-          } else {
-            commitToParent(draftRef.current);
-          }
-        } else {
-          commitToParent(draftRef.current);
+          const parsed = Number(raw);
+          if (Number.isFinite(parsed)) next = parsed;
         }
+        commitToParent(next);
         editingTextRef.current = null;
         setEditingText(null);
+
+        // Commit nilai dulu, baru akhiri tuning — cegah flush menulis angka lama
+        setWheelTuning(false);
         setFocusTuning(false);
       }}
       onChange={(e) => {
@@ -1213,12 +1220,15 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [applyElimBannerPreviewTransform, scheduleStagedElimBannerCompanionPush]
   );
 
+  const isElimBannerLayoutTuning = useCallback(
+    () => elimBannerWheelTuningRef.current || elimBannerFocusTuningRef.current,
+    []
+  );
+
   const commitElimBannerTuningLayout = useCallback(
-    (layout: EliminationBannerLayout, options?: { deferState?: boolean }) => {
+    (layout: EliminationBannerLayout) => {
       applyElimBannerLayoutLive(layout);
-      if (!options?.deferState) {
-        setElimBannerTuningLayout(layout);
-      }
+      setElimBannerTuningLayout(layout);
     },
     [applyElimBannerLayoutLive]
   );
@@ -1283,6 +1293,15 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     return { ...alert, id: STAGED_ELIM_PREVIEW_ALERT_ID, at: 0 };
   }, [buildTeamEliminationAlert, teams]);
 
+  const persistElimBannerLayout = useCallback(
+    (layout: EliminationBannerLayout) => {
+      elimBannerTuningLiveRef.current = layout;
+      setElimBannerTuningLayout(layout);
+      setElimBannerLayout(layout);
+    },
+    [setElimBannerLayout]
+  );
+
   const setElimBannerHoldPreviewSafe = useCallback(
     (on: boolean) => {
       if (on) {
@@ -1314,7 +1333,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       }
       const tuning = elimBannerTuningLayoutRef.current ?? elimBannerTuningLiveRef.current;
       if (tuning) {
-        setElimBannerLayout(tuning);
+        persistElimBannerLayout(tuning);
       }
       commitElimBannerVisualDraftToConfig();
       elimBannerTuningVisualRef.current = null;
@@ -1334,7 +1353,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       commitElimBannerVisualDraftToConfig,
       asset.id,
       elimBannerLayout,
-      setElimBannerLayout,
+      persistElimBannerLayout,
       visualConfig,
       visualOnly,
     ]
@@ -1402,36 +1421,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     elimBannerPreviewRevision,
   ]);
 
-  const flushElimBannerTuningLayoutState = useCallback(() => {
-    if (!elimBannerHoldPreview) return;
-    const live = elimBannerTuningLiveRef.current;
-    setElimBannerTuningLayout((prev) => {
-      if (
-        prev &&
-        prev.scale === live.scale &&
-        prev.xOffset === live.xOffset &&
-        prev.yOffset === live.yOffset
-      ) {
-        return prev;
-      }
-      return { ...live };
-    });
-  }, [elimBannerHoldPreview]);
-
-  useEffect(() => {
-    if (!elimBannerHoldPreview || elimBannerTuningActive) return;
-    flushElimBannerTuningLayoutState();
-  }, [elimBannerHoldPreview, elimBannerTuningActive, flushElimBannerTuningLayoutState]);
-
   const patchElimBannerLayout = useCallback(
     (patch: Partial<EliminationBannerLayout>) => {
       if (elimBannerHoldPreview) {
         const next = { ...elimBannerTuningLiveRef.current, ...patch };
-        commitElimBannerTuningLayout(next, {
-          deferState: elimBannerTuningActive,
-        });
-        if (!elimBannerTuningActive) {
-          setElimBannerTuningLayout(next);
+        commitElimBannerTuningLayout(next);
+        if (!isElimBannerLayoutTuning()) {
+          persistElimBannerLayout(next);
         }
         return;
       }
@@ -1439,8 +1435,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     },
     [
       elimBannerHoldPreview,
-      elimBannerTuningActive,
+      isElimBannerLayoutTuning,
       commitElimBannerTuningLayout,
+      persistElimBannerLayout,
       setElimBannerLayout,
     ]
   );
@@ -1558,15 +1555,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]
   );
 
+  const finalizeElimBannerLayoutEdit = useCallback(() => {
+    if (!elimBannerHoldPreview) return;
+    persistElimBannerLayout(elimBannerTuningLiveRef.current);
+    pushStagedElimBannerToCompanion();
+  }, [elimBannerHoldPreview, persistElimBannerLayout, pushStagedElimBannerToCompanion]);
+
   const handleElimBannerWheelTuning = useCallback(
     (active: boolean) => {
       elimBannerWheelTuningRef.current = active;
       syncElimBannerTuningActive();
       if (!active) {
-        flushElimBannerTuningLayoutState();
+        finalizeElimBannerLayoutEdit();
       }
     },
-    [syncElimBannerTuningActive, flushElimBannerTuningLayoutState]
+    [syncElimBannerTuningActive, finalizeElimBannerLayoutEdit]
   );
 
   const handleElimBannerFocusTuning = useCallback(
@@ -1574,10 +1577,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       elimBannerFocusTuningRef.current = active;
       syncElimBannerTuningActive();
       if (!active) {
-        flushElimBannerTuningLayoutState();
+        finalizeElimBannerLayoutEdit();
       }
     },
-    [syncElimBannerTuningActive, flushElimBannerTuningLayoutState]
+    [syncElimBannerTuningActive, finalizeElimBannerLayoutEdit]
   );
 
   const previewEliminationBanner = useCallback(() => {
@@ -3738,16 +3741,20 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                 <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
                                   Geser <span className="text-zinc-400">seluruh banner eliminasi</span> di canvas
                                   1920×1080 · POS X positif = kanan · bukan LAYOUT TRANSFORM leaderboard di atas.
-                                  {elimBannerHoldPreview && (
+                                  {elimBannerHoldPreview ? (
                                     <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
-                                      Preview aktif — perubahan langsung ke Monitor Preview / Program &amp; Link Output. Scroll di kolom angka (Shift = ±10) atau klik lalu ketik
+                                      Preview aktif — perubahan langsung ke Monitor Preview / Program &amp; Link Output. Scroll di kolom angka (Shift = ±10) atau klik lalu ketik. Nilai tersimpan otomatis saat kursor keluar dari kolom.
+                                    </span>
+                                  ) : (
+                                    <span className="block mt-1 text-zinc-500 normal-case">
+                                      Perubahan SCALE / POS X / POS Y tersimpan otomatis ke pengaturan project saat selesai mengedit kolom angka.
                                     </span>
                                   )}
                                 </p>
                                 <div className="grid grid-cols-3 gap-3">
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
-                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimNumberInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE banner (%)</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.scale} onChange={(val) => patchElimBannerLayout({ scale: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X banner</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.xOffset} onChange={(val) => patchElimBannerLayout({ xOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y banner</label><ElimBannerLayoutInput previewMode={elimBannerHoldPreview} value={effectiveElimBannerLayout.yOffset} onChange={(val) => patchElimBannerLayout({ yOffset: val })} onWheelTuningChange={handleElimBannerWheelTuning} onFocusTuningChange={handleElimBannerFocusTuning} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
                                 </div>
                                 <div className="mt-4 pt-4 border-t border-white/5">
                                   <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
