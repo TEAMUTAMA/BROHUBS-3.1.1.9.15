@@ -2,7 +2,6 @@
 import React, {
   useState,
   useEffect,
-  useLayoutEffect,
   useRef,
   useMemo,
   useCallback,
@@ -274,16 +273,6 @@ const FINAL_FOUR_TOP_OFFSET_PX = 56;
 const FINAL_FOUR_PANEL_EXIT_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const FINAL_FOUR_ENTER_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-const applyElimBannerTransformToElement = (
-  el: HTMLElement,
-  layout: EliminationBannerLayout
-): void => {
-  el.style.left = `calc(50% + ${layout.xOffset}px)`;
-  el.style.top = `${layout.yOffset}px`;
-  el.style.transform = `translateX(-50%) scale(${layout.scale / 100})`;
-  el.style.transformOrigin = 'top center';
-};
-
 const ScrollableInput = ({
   value,
   onChange,
@@ -340,7 +329,6 @@ const ElimBannerLayoutInput = ({
   previewMode = false,
   onWheelTuningChange,
   onFocusTuningChange,
-  onEditComplete,
   className,
 }: {
   value: number;
@@ -349,8 +337,6 @@ const ElimBannerLayoutInput = ({
   previewMode?: boolean;
   onWheelTuningChange?: (active: boolean) => void;
   onFocusTuningChange?: (active: boolean) => void;
-  /** Preview Sementara — simpan ke storage setelah selesai edit */
-  onEditComplete?: () => void;
   className?: string;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -367,9 +353,7 @@ const ElimBannerLayoutInput = ({
   const [editingText, setEditingText] = useState<string | null>(null);
   const editingTextRef = useRef<string | null>(null);
 
-  const onEditCompleteRef = useRef(onEditComplete);
   onChangeRef.current = onChange;
-  onEditCompleteRef.current = onEditComplete;
   draftRef.current = draft;
 
   const setWheelTuning = useCallback(
@@ -387,62 +371,55 @@ const ElimBannerLayoutInput = ({
   );
 
   const prevPreviewModeRef = useRef(false);
+  /** Nilai terakhir dikirim ke parent — cegah sync balik ke value stale saat scroll cepat */
+  const lastCommittedRef = useRef(Number.isFinite(value) ? value : 0);
 
   useEffect(() => {
-    const previewJustOn = previewMode && !prevPreviewModeRef.current;
+    const wasPreview = prevPreviewModeRef.current;
+    const previewJustOn = previewMode && !wasPreview;
+    const previewJustOff = !previewMode && wasPreview;
     prevPreviewModeRef.current = previewMode;
 
-    if (previewJustOn) {
+    if (previewJustOn || previewJustOff) {
       const next = Number.isFinite(value) ? value : 0;
       draftRef.current = next;
+      lastCommittedRef.current = next;
       setDraft(next);
       setEditingText(null);
       return;
     }
 
+    // Preview Sementara: draft lokal yang pegang angka (parent React/shared-state masih async)
+    if (previewMode) return;
+
     if (focusedRef.current || wheelBurstRef.current || wheelSettlingRef.current) return;
 
-    // Preview Sementara: sync draft setelah persist (bukan saat sedang edit)
-    if (previewMode) {
-      const next = Number.isFinite(value) ? value : 0;
-      if (draftRef.current !== next) {
-        draftRef.current = next;
-        setDraft(next);
-        setEditingText(null);
-      }
-      return;
-    }
     const next = Number.isFinite(value) ? value : 0;
     if (draftRef.current === next) return;
     draftRef.current = next;
+    lastCommittedRef.current = next;
     setDraft(next);
     setEditingText(null);
   }, [value, previewMode]);
 
   const commitToParent = useCallback((next: number) => {
     draftRef.current = next;
+    lastCommittedRef.current = next;
     setDraft(next);
     onChangeRef.current(next);
   }, []);
 
   const endWheelBurst = useCallback(() => {
     const next = draftRef.current;
+    lastCommittedRef.current = next;
+    onChangeRef.current(next);
+    wheelBurstRef.current = false;
     wheelSettlingRef.current = true;
-    commitToParent(next);
     setWheelTuning(false);
-    if (!previewMode) {
-      wheelBurstRef.current = false;
-      wheelSettlingRef.current = false;
-      return;
-    }
     requestAnimationFrame(() => {
-      onEditCompleteRef.current?.();
-      requestAnimationFrame(() => {
-        wheelBurstRef.current = false;
-        wheelSettlingRef.current = false;
-      });
+      wheelSettlingRef.current = false;
     });
-  }, [commitToParent, setWheelTuning, previewMode]);
+  }, [setWheelTuning]);
 
   const bumpByWheel = useCallback(
     (delta: number) => {
@@ -452,7 +429,9 @@ const ElimBannerLayoutInput = ({
       }
       const next = draftRef.current + delta;
       draftRef.current = next;
+      lastCommittedRef.current = next;
       setDraft(next);
+      editingTextRef.current = null;
       setEditingText(null);
       onChangeRef.current(next);
 
@@ -532,22 +511,27 @@ const ElimBannerLayoutInput = ({
           wheelEndTimerRef.current = null;
         }
         wheelBurstRef.current = false;
-        wheelSettlingRef.current = false;
 
-        const raw = (editingTextRef.current ?? String(draftRef.current)).trim();
+        // Scroll wheel hanya mengubah draft — editingTextRef masih seed lama dari onFocus
         let next = draftRef.current;
-        if (raw !== '' && raw !== '-') {
+        const raw = editingTextRef.current?.trim();
+        if (raw != null && raw !== '' && raw !== '-') {
           const parsed = Number(raw);
           if (Number.isFinite(parsed)) next = parsed;
         }
-        commitToParent(next);
+        draftRef.current = next;
+        lastCommittedRef.current = next;
+        setDraft(next);
+        onChangeRef.current(next);
         editingTextRef.current = null;
         setEditingText(null);
 
-        // Commit nilai dulu, akhiri tuning, lalu persist sekali
+        wheelSettlingRef.current = true;
         setFocusTuning(false);
         setWheelTuning(false);
-        onEditCompleteRef.current?.();
+        requestAnimationFrame(() => {
+          wheelSettlingRef.current = false;
+        });
       }}
       onChange={(e) => {
         const raw = e.target.value;
@@ -572,7 +556,6 @@ const ElimNumberInput = ({
   previewMode = false,
   onWheelTuningChange,
   onFocusTuningChange,
-  onEditComplete,
 }: {
   value: number;
   onChange: (val: number) => void;
@@ -580,7 +563,6 @@ const ElimNumberInput = ({
   previewMode?: boolean;
   onWheelTuningChange?: (active: boolean) => void;
   onFocusTuningChange?: (active: boolean) => void;
-  onEditComplete?: () => void;
 }) =>
   previewMode ? (
     <ElimBannerLayoutInput
@@ -590,7 +572,6 @@ const ElimNumberInput = ({
       className={className}
       onWheelTuningChange={onWheelTuningChange}
       onFocusTuningChange={onFocusTuningChange}
-      onEditComplete={onEditComplete}
     />
   ) : (
     <ScrollableInput value={value} onChange={onChange} className={className} />
@@ -822,22 +803,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     INITIAL_VISUAL_CONFIG
   );
 
-  const [elimBannerPreviewRevision, setElimBannerPreviewRevision] = useState(0);
-  const elimBannerTuningVisualRef = useRef<EliminationBannerVisual | null>(null);
-  /** Draft visual overlay saat Preview Sementara — state agar input tidak stale */
-  const [elimBannerTuningVisual, setElimBannerTuningVisual] =
-    useState<EliminationBannerVisual | null>(null);
-  const bumpElimBannerPreview = useCallback(
-    () => setElimBannerPreviewRevision((n) => n + 1),
-    []
-  );
-
   const elimBannerVisual = useMemo(
-    () =>
-      elimBannerTuningVisual != null
-        ? elimBannerTuningVisual
-        : pickEliminationBannerVisual(visualConfig),
-    [elimBannerTuningVisual, visualConfig]
+    () => pickEliminationBannerVisual(visualConfig),
+    [visualConfig]
   );
 
   const elimBannerTypography = useMemo(
@@ -1197,15 +1165,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
-  /** Draft posisi/scale saat Preview Sementara — hindari write storage tiap scroll (glitch) */
-  const [elimBannerTuningLayout, setElimBannerTuningLayout] =
-    useState<EliminationBannerLayout | null>(null);
-  const elimBannerTuningLayoutRef = useRef<EliminationBannerLayout | null>(null);
   const stagedElimCompanionPushedRef = useRef(false);
   const [elimBannerTuningActive, setElimBannerTuningActive] = useState(false);
   const elimBannerWheelTuningRef = useRef(false);
   const elimBannerFocusTuningRef = useRef(false);
-  const elimBannerPreviewWrapRef = useRef<HTMLDivElement>(null);
   const elimBannerTuningLiveRef = useRef<EliminationBannerLayout>(DEFAULT_ELIMINATION_BANNER_LAYOUT);
   const stagedCompanionPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [frozenStagedElimAlert, setFrozenStagedElimAlert] = useState<TeamEliminationAlert | null>(
@@ -1218,24 +1181,28 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     );
   }, []);
 
-  const applyElimBannerPreviewTransform = useCallback((layout: EliminationBannerLayout) => {
-    const el = elimBannerPreviewWrapRef.current;
-    if (el) applyElimBannerTransformToElement(el, layout);
-  }, []);
-
   const pushStagedElimBannerToCompanion = useCallback(() => {
     if (visualOnly || !elimBannerHoldPreview) return;
-    const previewVisual = elimBannerTuningVisualRef.current;
+    const stagedAlert =
+      frozenStagedElimAlert ??
+      (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
+      STAGED_ELIM_PREVIEW_FALLBACK;
     notifyCompanionData({
       assetId: asset.id,
       data: {
         BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
-        BROHUBS_LEADERBOARD_VISUAL: previewVisual
-          ? { ...visualConfig, ...previewVisual }
-          : visualConfig,
+        BROHUBS_LEADERBOARD_VISUAL: visualConfig,
+        [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
       },
     });
-  }, [asset.id, visualOnly, elimBannerHoldPreview, visualConfig]);
+  }, [
+    asset.id,
+    visualOnly,
+    elimBannerHoldPreview,
+    visualConfig,
+    frozenStagedElimAlert,
+    eliminationAlert,
+  ]);
 
   const scheduleStagedElimBannerCompanionPush = useCallback(() => {
     if (visualOnly || !elimBannerHoldPreview) return;
@@ -1246,69 +1213,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     }, 120);
   }, [visualOnly, elimBannerHoldPreview, pushStagedElimBannerToCompanion]);
 
-  const applyElimBannerLayoutLive = useCallback(
-    (layout: EliminationBannerLayout) => {
-      elimBannerTuningLiveRef.current = layout;
-      applyElimBannerPreviewTransform(layout);
-      scheduleStagedElimBannerCompanionPush();
-    },
-    [applyElimBannerPreviewTransform, scheduleStagedElimBannerCompanionPush]
-  );
-
-  const isElimBannerLayoutTuning = useCallback(
-    () => elimBannerWheelTuningRef.current || elimBannerFocusTuningRef.current,
-    []
-  );
-
-  const commitElimBannerTuningLayout = useCallback(
-    (layout: EliminationBannerLayout) => {
-      applyElimBannerLayoutLive(layout);
-      setElimBannerTuningLayout(layout);
-    },
-    [applyElimBannerLayoutLive]
-  );
-
-  const persistElimBannerVisualDraft = useCallback(
-    (draft?: EliminationBannerVisual) => {
-      const visual = draft ?? elimBannerTuningVisualRef.current;
-      if (!visual) return;
-      setVisualConfig((prev) => ({
-        ...prev,
-        ...visual,
-        elimBannerTypography: visual.elimBannerTypography,
-        elimBannerFullLayout: visual.elimBannerFullLayout,
-      }));
-    },
-    [setVisualConfig]
-  );
-
-  const commitElimBannerVisualDraftToConfig = useCallback(() => {
-    persistElimBannerVisualDraft();
-  }, [persistElimBannerVisualDraft]);
-
   const mutateElimBannerVisualDraft = useCallback(
     (mutate: (picked: EliminationBannerVisual) => EliminationBannerVisual) => {
-      const base =
-        elimBannerTuningVisualRef.current ??
-        elimBannerTuningVisual ??
-        pickEliminationBannerVisual(visualConfig);
-      const next = mutate(base);
-      elimBannerTuningVisualRef.current = next;
-      setElimBannerTuningVisual(next);
-      bumpElimBannerPreview();
-      if (!isElimBannerLayoutTuning()) {
-        persistElimBannerVisualDraft(next);
-      }
+      setVisualConfig((prev) => {
+        const base = pickEliminationBannerVisual(prev);
+        const next = mutate(base);
+        return {
+          ...prev,
+          ...next,
+          elimBannerTypography: next.elimBannerTypography,
+          elimBannerFullLayout: next.elimBannerFullLayout,
+        };
+      });
       scheduleStagedElimBannerCompanionPush();
     },
-    [
-      visualConfig,
-      elimBannerTuningVisual,
-      bumpElimBannerPreview,
-      isElimBannerLayoutTuning,
-      persistElimBannerVisualDraft,
-      scheduleStagedElimBannerCompanionPush,
-    ]
+    [setVisualConfig, scheduleStagedElimBannerCompanionPush]
   );
 
   const patchElimBannerVisualField = useCallback(
@@ -1331,14 +1250,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     }
   }, [pushEliminationToCompanion, setEliminationAlert]);
 
-  useEffect(() => {
-    elimBannerTuningLayoutRef.current = elimBannerTuningLayout;
-  }, [elimBannerTuningLayout]);
-
-  useEffect(() => {
-    elimBannerTuningVisualRef.current = elimBannerTuningVisual;
-  }, [elimBannerTuningVisual]);
-
   const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert => {
     if (teams.length === 0) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
     const teamIndex = teams.findIndex((t) => t.active && !t.status.every((s) => s === 0));
@@ -1352,37 +1263,27 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     return { ...alert, id: STAGED_ELIM_PREVIEW_ALERT_ID, at: 0 };
   }, [buildTeamEliminationAlert, teams]);
 
-  const persistElimBannerLayout = useCallback(
-    (layout: EliminationBannerLayout) => {
-      elimBannerTuningLiveRef.current = layout;
-      setElimBannerTuningLayout(layout);
-      setElimBannerLayout(layout);
-    },
-    [setElimBannerLayout]
-  );
-
   const setElimBannerHoldPreviewSafe = useCallback(
     (on: boolean) => {
       if (on) {
-        const seed = { ...elimBannerLayout };
-        setElimBannerTuningLayout(seed);
-        elimBannerTuningLiveRef.current = seed;
-        const visualSeed = pickEliminationBannerVisual(visualConfig);
-        elimBannerTuningVisualRef.current = visualSeed;
-        setElimBannerTuningVisual(visualSeed);
-        bumpElimBannerPreview();
-        stagedElimCompanionPushedRef.current = false;
-        setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
+        if (eliminationClearTimerRef.current) {
+          clearTimeout(eliminationClearTimerRef.current);
+          eliminationClearTimerRef.current = null;
+        }
+        const stagedAlert = buildStagedElimPreviewAlert();
+        elimBannerTuningLiveRef.current = { ...elimBannerLayout };
+        stagedElimCompanionPushedRef.current = true;
+        setFrozenStagedElimAlert(stagedAlert);
+        setEliminationAlert(stagedAlert);
         setElimBannerHoldPreview(true);
         if (!visualOnly) {
-          const previewVisual = elimBannerTuningVisualRef.current;
+          pushEliminationToCompanion(stagedAlert);
           notifyCompanionData({
             assetId: asset.id,
             data: {
-              BROHUBS_ELIMINATION_BANNER_LAYOUT: seed,
-              BROHUBS_LEADERBOARD_VISUAL: previewVisual
-                ? { ...visualConfig, ...previewVisual }
-                : visualConfig,
+              BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
+              BROHUBS_LEADERBOARD_VISUAL: visualConfig,
+              [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
             },
           });
         }
@@ -1392,15 +1293,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         clearTimeout(stagedCompanionPushTimerRef.current);
         stagedCompanionPushTimerRef.current = null;
       }
-      const tuning = elimBannerTuningLayoutRef.current ?? elimBannerTuningLiveRef.current;
-      if (tuning) {
-        persistElimBannerLayout(tuning);
-      }
-      persistElimBannerVisualDraft();
-      elimBannerTuningVisualRef.current = null;
-      setElimBannerTuningVisual(null);
-      bumpElimBannerPreview();
-      setElimBannerTuningLayout(null);
       elimBannerWheelTuningRef.current = false;
       elimBannerFocusTuningRef.current = false;
       setElimBannerTuningActive(false);
@@ -1410,34 +1302,31 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     },
     [
       buildStagedElimPreviewAlert,
-      bumpElimBannerPreview,
       clearPreviewEliminationState,
-      persistElimBannerVisualDraft,
+      pushEliminationToCompanion,
+      setEliminationAlert,
       asset.id,
       elimBannerLayout,
-      persistElimBannerLayout,
       visualConfig,
       visualOnly,
     ]
   );
 
-  /** Preview: baca live ref (sync) + state agar input & canvas tidak stale */
-  const effectiveElimBannerLayout = elimBannerHoldPreview
-    ? elimBannerTuningLiveRef.current
-    : elimBannerLayout;
+  const effectiveElimBannerLayout = elimBannerLayout;
 
   useEffect(() => {
     if (!elimBannerHoldPreview) {
       setFrozenStagedElimAlert(null);
-      return;
     }
-    setFrozenStagedElimAlert(buildStagedElimPreviewAlert());
-    // Hanya snapshot saat Preview Sementara dinyalakan — jangan rebuild tiap perubahan teams
   }, [elimBannerHoldPreview]);
 
   const displayElimAlert = elimBannerHoldPreview
     ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
     : eliminationAlert;
+
+  const isElimBannerTuningPreview =
+    elimBannerHoldPreview ||
+    eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID;
   const elimBannerIsPanelsMode = visualConfig.elimBannerDesignMode !== 'full';
   const elimBannerPanelSwitchLocked = elimBannerHoldPreview && !elimBannerIsPanelsMode;
   const elimBannerCustomSwitchLocked = elimBannerHoldPreview && elimBannerIsPanelsMode;
@@ -1455,14 +1344,12 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     'Matikan Preview Sementara untuk mengganti opsi ini';
 
   const elimBannerPositionStyle = useMemo((): React.CSSProperties => {
-    if (elimBannerHoldPreview) {
-      return { willChange: 'transform, top, left' };
-    }
     return {
       left: `calc(50% + ${effectiveElimBannerLayout.xOffset}px)`,
       top: `${effectiveElimBannerLayout.yOffset}px`,
       transform: `translateX(-50%) scale(${effectiveElimBannerLayout.scale / 100})`,
       transformOrigin: 'top center',
+      ...(elimBannerHoldPreview ? { willChange: 'transform, top, left' as const } : {}),
     };
   }, [
     effectiveElimBannerLayout.scale,
@@ -1471,35 +1358,18 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     elimBannerHoldPreview,
   ]);
 
-  useLayoutEffect(() => {
-    if (!elimBannerHoldPreview) return;
-    applyElimBannerPreviewTransform(elimBannerTuningLiveRef.current);
-  }, [
-    elimBannerHoldPreview,
-    applyElimBannerPreviewTransform,
-    elimBannerTuningLayout,
-    elimBannerPreviewRevision,
-  ]);
-
   const patchElimBannerLayout = useCallback(
     (patch: Partial<EliminationBannerLayout>) => {
+      setElimBannerLayout((prev) => {
+        const next = { ...prev, ...patch };
+        elimBannerTuningLiveRef.current = next;
+        return next;
+      });
       if (elimBannerHoldPreview) {
-        const next = { ...elimBannerTuningLiveRef.current, ...patch };
-        commitElimBannerTuningLayout(next);
-        if (!isElimBannerLayoutTuning()) {
-          persistElimBannerLayout(next);
-        }
-        return;
+        scheduleStagedElimBannerCompanionPush();
       }
-      setElimBannerLayout((prev) => ({ ...prev, ...patch }));
     },
-    [
-      elimBannerHoldPreview,
-      isElimBannerLayoutTuning,
-      commitElimBannerTuningLayout,
-      persistElimBannerLayout,
-      setElimBannerLayout,
-    ]
+    [setElimBannerLayout, elimBannerHoldPreview, scheduleStagedElimBannerCompanionPush]
   );
 
   const patchElimBannerTypography = useCallback(
@@ -1631,24 +1501,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [syncElimBannerTuningActive]
   );
 
-  const finalizeElimBannerTuningEdit = useCallback(() => {
-    if (!elimBannerHoldPreview) return;
-    persistElimBannerLayout(elimBannerTuningLiveRef.current);
-    persistElimBannerVisualDraft(elimBannerTuningVisualRef.current ?? undefined);
-    pushStagedElimBannerToCompanion();
-  }, [
-    elimBannerHoldPreview,
-    persistElimBannerLayout,
-    persistElimBannerVisualDraft,
-    pushStagedElimBannerToCompanion,
-  ]);
-
   const elimBannerPreviewInputProps = elimBannerHoldPreview
     ? {
         previewMode: true as const,
         onWheelTuningChange: handleElimBannerWheelTuning,
         onFocusTuningChange: handleElimBannerFocusTuning,
-        onEditComplete: finalizeElimBannerTuningEdit,
       }
     : { previewMode: false as const };
 
@@ -1990,15 +1847,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   // Preview Sementara: sync layout/visual setelah scroll berhenti (tidak saat wheel aktif)
   useEffect(() => {
     if (visualOnly || !elimBannerHoldPreview || elimBannerTuningActive) return;
-    const previewVisual = elimBannerTuningVisualRef.current;
+    const stagedAlert =
+      frozenStagedElimAlert ??
+      (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
+      STAGED_ELIM_PREVIEW_FALLBACK;
     const timer = setTimeout(() => {
       notifyCompanionData({
         assetId: asset.id,
         data: {
-          BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
-          BROHUBS_LEADERBOARD_VISUAL: previewVisual
-            ? { ...visualConfig, ...previewVisual }
-            : visualConfig,
+          BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
+          BROHUBS_LEADERBOARD_VISUAL: visualConfig,
+          [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
         },
       });
     }, 380);
@@ -2008,8 +1867,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     visualOnly,
     elimBannerHoldPreview,
     elimBannerTuningActive,
-    elimBannerPreviewRevision,
+    elimBannerLayout,
     visualConfig,
+    frozenStagedElimAlert,
+    eliminationAlert,
   ]);
 
   const handleResetCurrentMatch = () => {
@@ -2892,23 +2753,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const elimBannerPreviewNode = useMemo(
     () => (
       <div
-        ref={elimBannerPreviewWrapRef}
         className="absolute z-[500] pointer-events-none"
         style={elimBannerPositionStyle}
       >
         <TeamEliminatedBanner
           alert={displayElimAlert}
           visual={elimBannerVisual}
-          tuningPreview={elimBannerHoldPreview}
+          tuningPreview={isElimBannerTuningPreview}
         />
       </div>
     ),
     [
       displayElimAlert,
       elimBannerVisual,
-      elimBannerHoldPreview,
+      isElimBannerTuningPreview,
       elimBannerPositionStyle,
-      elimBannerPreviewRevision,
     ]
   );
 
