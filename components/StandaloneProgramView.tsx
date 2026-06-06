@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Game, Theme } from '../types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Game, Theme, PlayerData } from '../types';
+import { loadProjectPlayers } from '../lib/projectPlayers';
 import { ASSET_DATABASE } from '../constants/assets';
 import { getGames, getThemes } from '../services/gameService';
 import { useSharedState } from '../lib/useSharedState';
@@ -8,7 +9,9 @@ import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey } from '../lib/programLayer
 import { useCompanionOutputSync } from '../lib/useCompanionOutputSync';
 import OverlayTopFraggersView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayLeaderboardView';
+import OverlayTeamRosterView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTeamRosterView';
 import { motion, AnimatePresence } from 'motion/react';
+import { PreviewControlContext } from './PanelControlMonitor';
 import { Grid3X3, Power, Monitor, Signal, HelpCircle, Activity } from 'lucide-react';
 
 const StandaloneProgramView: React.FC = () => {
@@ -36,6 +39,37 @@ const StandaloneProgramView: React.FC = () => {
   const [notifyConnected, setNotifyConnected] = useState(true);
   const [scale, setScale] = useState(1);
   const [globalLogo, setGlobalLogo] = useState<string | null>(null);
+  const [projectPlayers, setProjectPlayers] = useState<PlayerData[]>(() =>
+    loadProjectPlayers(projectScope)
+  );
+  const [layerPlayKeys, setLayerPlayKeys] = useState<Record<number, number>>({});
+  const prevProgramLayersRef = useRef(programLayers);
+
+  useEffect(() => {
+    const prev = prevProgramLayersRef.current;
+    const next = programLayers;
+
+    setLayerPlayKeys((keys) => {
+      const nextKeys = { ...keys };
+      let bumped = false;
+
+      Object.entries(next).forEach(([layer, assetId]) => {
+        const layerNum = Number(layer);
+        if (assetId && assetId !== prev[layerNum]) {
+          nextKeys[layerNum] = (nextKeys[layerNum] ?? 0) + 1;
+          bumped = true;
+        }
+      });
+
+      return bumped ? nextKeys : keys;
+    });
+
+    prevProgramLayersRef.current = next;
+  }, [programLayers]);
+
+  useEffect(() => {
+    setProjectPlayers(loadProjectPlayers(projectScope));
+  }, [projectScope]);
 
   // Load games, themes, and global logo on mount
   useEffect(() => {
@@ -142,6 +176,7 @@ const StandaloneProgramView: React.FC = () => {
             userRole="member" // standalones run in non-control visual mode
             onBack={() => {}}
             globalLogo={globalLogo}
+            projectPlayers={projectPlayers}
             isGlobalStudio={true}
             visualOnly={true}
             style={style}
@@ -160,6 +195,26 @@ const StandaloneProgramView: React.FC = () => {
             userRole="member"
             onBack={() => {}}
             globalLogo={globalLogo}
+            projectPlayers={projectPlayers}
+            isGlobalStudio={true}
+            visualOnly={true}
+            style={style}
+          />
+        );
+      }
+      if (assetToPlay.id === 'pmgc-team-roster') {
+        return (
+          <OverlayTeamRosterView
+            key={overrideKey || assetToPlay.id}
+            asset={assetToPlay}
+            theme={themeToUse}
+            games={games}
+            themes={themes}
+            availableAssets={ASSET_DATABASE}
+            userRole="member"
+            onBack={() => {}}
+            globalLogo={globalLogo}
+            projectPlayers={projectPlayers}
             isGlobalStudio={true}
             visualOnly={true}
             style={style}
@@ -168,7 +223,7 @@ const StandaloneProgramView: React.FC = () => {
       }
     }
     return null;
-  }, [themes, selectedThemeId, games, globalLogo]);
+  }, [themes, selectedThemeId, games, globalLogo, projectPlayers]);
 
   if (loading) {
     return (
@@ -212,23 +267,38 @@ const StandaloneProgramView: React.FC = () => {
       >
         {/* Layer Renderer */}
         <div className="absolute inset-0">
-          <AnimatePresence>
+          <AnimatePresence mode="wait" initial={false}>
             {activeProgramEntries
               .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([layer, assetId]) =>
-                renderProgramAsset(
-                  assetId,
-                  {
-                    zIndex: Number(layer),
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                  },
-                  `standalone-layer-${layer}-${assetId}`
-                )
-              )}
+              .map(([layer, assetId]) => {
+                const layerNum = Number(layer);
+                const layerPlayKey = layerPlayKeys[layerNum] ?? 0;
+                return (
+                  <PreviewControlContext.Provider
+                    key={`standalone-layer-${layer}-${assetId}-${layerPlayKey}`}
+                    value={{
+                      playKey: layerPlayKey,
+                      programPlayKey: layerPlayKey,
+                      isLooping: false,
+                      isPreviewPlaying: true,
+                      replay: () => {},
+                    }}
+                  >
+                    {renderProgramAsset(
+                      assetId,
+                      {
+                        zIndex: layerNum,
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                      },
+                      `standalone-layer-${layer}-${assetId}-${layerPlayKey}`
+                    )}
+                  </PreviewControlContext.Provider>
+                );
+              })}
           </AnimatePresence>
         </div>
 

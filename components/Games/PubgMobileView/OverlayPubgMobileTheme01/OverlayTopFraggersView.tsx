@@ -10,7 +10,16 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Theme, Asset, Game, PlayerData } from '../../../../types';
 import PanelControlMonitor, { PreviewControlContext } from '../../../PanelControlMonitor';
-import { AnimationConfig, getAnimationVariants } from '@/constants/transitions';
+import {
+  AnimationConfig,
+  getAnimationSignature,
+  getRootMotionProps,
+  getChildMotionInitial,
+  getChildMotionExit,
+  getMotionEase,
+  resolveStaggerDelay,
+  resolveExitStaggerDelay,
+} from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 import { notifyCompanionData } from '@/lib/overlayData';
 import { useOverlayFonts } from '../useEliminationBannerFonts';
@@ -50,6 +59,10 @@ interface OverlayTopFraggersViewProps {
   getAssetStatusProp?: (id: string) => number;
   onPreviewContentChange?: (content: React.ReactNode) => void;
   visualOnly?: boolean;
+  /** Monitor staging/program — animasi sama seperti editor, tanpa chrome OBS */
+  monitorFeed?: boolean;
+  /** Override play key untuk sinkron animasi monitor program */
+  feedPlayKey?: number;
   style?: React.CSSProperties;
 }
 
@@ -96,7 +109,7 @@ const DEFAULT_TEAM_LOGO = 'https://api.dicebear.com/7.x/identicon/svg?seed=DEFAU
 
 const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({ 
   asset, theme, games, themes, availableAssets, userRole, onBack, onSelectTheme, onSelectAsset, globalLogo, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
-  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
+  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, monitorFeed = false, feedPlayKey, style
 }) => {
   useOverlayFonts();
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
@@ -321,14 +334,17 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const { replay } = React.useContext(PreviewControlContext);
+  const { replay, playKey } = React.useContext(PreviewControlContext);
 
   const handleSave = () => {
     setIsSaving(true);
     
     // Commit draft to shared state
-    setAnimationConfig(draftAnimationConfig);
+    setAnimationConfig({ ...draftAnimationConfig, mode: 'custom' });
     
+    if (programAssetId === asset.id) {
+      setProgramPlayKey((k) => k + 1);
+    }
     // Briefly delay replay to allow state to propagate
     if (replay) {
       setTimeout(() => replay(), 100);
@@ -342,9 +358,11 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
   const [matchInfo, setMatchInfo] = useSharedState('BROHUBS_TOPFRAGGERS_MATCH', { title: 'TOP FRAGGERS', subtitle: 'LIVE PERFORMANCE TELEMETRY' });
   const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
+  const [programPlayKey, setProgramPlayKey] = useState(0);
   
   const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
   const setProgramAssetId = (id: string | null) => {
+    if (id) setProgramPlayKey((k) => k + 1);
     if (onProgramAssetChange) onProgramAssetChange(id);
     else setInternalProgramAssetId(id);
   };
@@ -411,7 +429,10 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
     duration: 0.8,
     delay: 0,
     easing: 'easeOut',
-    useSpring: true
+    useSpring: true,
+    staggerChildren: true,
+    staggerDelay: 0.1,
+    staggerDirection: 'top-down',
   });
 
   const [draftAnimationConfig, setDraftAnimationConfig] = useState<AnimationConfig>(animationConfig);
@@ -446,25 +467,25 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
     return () => clearTimeout(timer);
   }, [asset.id, fraggers, visualConfig, typography, cardLayout, matchInfo, visualOnly]);
 
-  const getAssetAnimationVariants = useCallback(() => {
-    const variants = getAnimationVariants(animationConfig);
-    const exitVariant = variants.exit as any;
-    
-    // Customize the exit to be more dramatic as requested
-    return {
-      ...variants,
-      exit: {
-        ...exitVariant,
-        scale: animationConfig.outType === 'fade' ? 0.9 : 1.05,
-        transition: {
-          ...exitVariant?.transition,
-          duration: Math.max(animationConfig.duration, 1.2),
-          delay: 0.1,
-          ease: "backIn"
-        }
-      }
-    };
-  }, [animationConfig]);
+  const activeAnimConfig = useMemo(
+    () => (visualOnly || monitorFeed ? animationConfig : draftAnimationConfig),
+    [visualOnly, monitorFeed, animationConfig, draftAnimationConfig]
+  );
+
+  const rootMotionProps = useMemo(
+    () => getRootMotionProps(activeAnimConfig),
+    [activeAnimConfig]
+  );
+
+  const fraggerCardAnimConfig = useMemo(
+    (): AnimationConfig => ({
+      ...activeAnimConfig,
+      staggerChildren: activeAnimConfig.staggerChildren ?? true,
+      staggerDelay: activeAnimConfig.staggerDelay ?? 0.1,
+      staggerDirection: activeAnimConfig.staggerDirection ?? 'top-down',
+    }),
+    [activeAnimConfig]
+  );
 
   const displayFraggers = useMemo(() => {
     let list = [...fraggers];
@@ -477,19 +498,20 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
     return list;
   }, [fraggers, selectedTeamFilter]);
 
-  const livePreviewContent = useMemo(() => (
+  const renderLivePreview = useCallback((overrideAnimKey?: number) => {
+    const resolvedAnimKey = overrideAnimKey ?? feedPlayKey ?? playKey;
+    return (
     <motion.div 
-      initial={visualOnly ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ 
-        opacity: 0,
-        transition: { duration: 1.5, delay: 0.5 } 
-      }}
+      key={`fraggers-asset-${resolvedAnimKey}-${getAnimationSignature(activeAnimConfig)}`}
+      initial={rootMotionProps.initial}
+      animate={rootMotionProps.animate}
+      exit={rootMotionProps.exit}
+      transition={rootMotionProps.transition}
       style={style}
       className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden ${style?.position === 'absolute' ? '' : 'mx-auto'}`}
     >
        {/* Checkerboard Background for Transparency Visualization */}
-       {!visualOnly && (
+       {!visualOnly && !monitorFeed && (
          <div className="absolute inset-0 opacity-40" style={{ 
              backgroundImage: 'conic-gradient(#0a0a0a 90deg, #050505 90deg 180deg, #0a0a0a 180deg 270deg, #050505 270deg)',
              backgroundSize: '40px 40px' 
@@ -503,10 +525,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
        )}
 
        {/* Main Content Area - Centered by default but elements can be moved via offsets */}
-       <motion.div 
-         {...getAssetAnimationVariants()}
-         className="absolute inset-0 flex flex-col items-center justify-center gap-4"
-       >
+       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
            <div className="text-center relative z-20 mb-8">
                <motion.h1 
                  exit={{ scale: 0.8, opacity: 0, y: -50, transition: { duration: 0.5, ease: "easeIn" } }}
@@ -527,21 +546,44 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                {displayFraggers.map((player, idx) => (
                    <motion.div 
                      key={`${player.name}-${player.team}`}
-                     initial={visualOnly ? false : { y: 50, opacity: 0 }}
-                     animate={{ y: 0, opacity: 1 }}
-                     exit={{ 
-                        y: animationConfig.outType === 'slide-down' ? 1000 : (animationConfig.outType === 'slide-up' ? -1000 : 0),
-                        x: animationConfig.outType === 'slide-right' ? 2000 : (animationConfig.outType === 'slide-left' ? -2000 : 0),
-                        opacity: 0, 
-                        scale: 0.7,
-                        rotate: idx % 2 === 0 ? 10 : -10,
-                        transition: { 
-                          delay: idx * 0.08, 
-                          duration: 0.8, 
-                          ease: "easeInOut"
-                        } 
+                     initial={getChildMotionInitial(fraggerCardAnimConfig, 72)}
+                     animate={{ x: 0, y: 0, opacity: 1 }}
+                     exit={{
+                        ...getChildMotionExit(fraggerCardAnimConfig, 480),
+                        transition: {
+                          delay: resolveExitStaggerDelay(
+                            idx,
+                            displayFraggers.length,
+                            fraggerCardAnimConfig
+                          ),
+                          duration: fraggerCardAnimConfig.duration * 0.65,
+                          ease: getMotionEase(fraggerCardAnimConfig),
+                        },
                      }}
-                     transition={{ delay: 0.2 + (idx * 0.1), duration: 0.5 }}
+                     transition={
+                       fraggerCardAnimConfig.useSpring
+                         ? {
+                             type: 'spring' as const,
+                             stiffness: 110,
+                             damping: 18,
+                             delay: resolveStaggerDelay(
+                               idx,
+                               displayFraggers.length,
+                               fraggerCardAnimConfig,
+                               0.15
+                             ),
+                           }
+                         : {
+                             delay: resolveStaggerDelay(
+                               idx,
+                               displayFraggers.length,
+                               fraggerCardAnimConfig,
+                               0.15
+                             ),
+                             duration: fraggerCardAnimConfig.duration * 0.55,
+                             ease: getMotionEase(fraggerCardAnimConfig),
+                           }
+                     }
                      className="relative w-56 flex flex-col items-center pt-10 pb-8 px-4 overflow-hidden shadow-2xl" 
                      style={{ height: '520px', backgroundColor: visualConfig.cardBgImage ? 'transparent' : visualConfig.cardBg, backgroundImage: visualConfig.cardBgImage ? `url(${visualConfig.cardBgImage})` : 'none', fontFamily: fraggerFontFamily, fontWeight: typography.card.weight, fontStyle: typography.card.italic ? 'italic' : 'normal' }}
                    >
@@ -607,9 +649,16 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                    </motion.div>
                ))}
            </div>
-       </motion.div>
+       </div>
     </motion.div>
-  ), [visualConfig, typography, fraggerFontFamily, matchInfo, displayFraggers, cardLayout, animationConfig, globalLogo, style, visualOnly, getAssetAnimationVariants]);
+    );
+  }, [visualConfig, typography, fraggerFontFamily, matchInfo, displayFraggers, cardLayout, fraggerCardAnimConfig, globalLogo, style, visualOnly, monitorFeed, rootMotionProps, activeAnimConfig, feedPlayKey, playKey]);
+
+  const livePreviewContent = useMemo(() => renderLivePreview(), [renderLivePreview]);
+  const programFeedContent = useMemo(
+    () => renderLivePreview(programPlayKey),
+    [renderLivePreview, programPlayKey]
+  );
 
 
   // Sync preview content to parent
@@ -620,7 +669,7 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
   }, [livePreviewContent, onPreviewContentChange, visualOnly]);
 
   if (visualOnly) {
-    return livePreviewContent;
+    return renderLivePreview(feedPlayKey);
   }
 
   return (
@@ -940,9 +989,10 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
           <div className={`transition-all duration-300 flex shrink-0 ${showMonitors ? 'opacity-100' : 'w-0 opacity-0 pointer-events-none'}`}>
             <PanelControlMonitor 
               userRole={userRole} 
-              customPreview={livePreviewContent} 
+              customPreview={livePreviewContent}
+              programPlayKey={programPlayKey}
               programPreview={
-                programAssetId === asset.id ? livePreviewContent : (
+                programAssetId === asset.id ? programFeedContent : (
                   programAssetId ? (
                     <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
                       <h2 className="text-4xl font-black text-[#ccff00] mb-4">ASSET PLAYING</h2>

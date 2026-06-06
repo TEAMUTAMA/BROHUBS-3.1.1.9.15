@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export const PreviewControlContext = createContext({
   playKey: 0,
+  programPlayKey: 0,
   isLooping: false,
   isPreviewPlaying: true,
   replay: () => {}
@@ -22,6 +23,8 @@ interface PanelControlMonitorProps {
   userRole?: 'admin' | 'member';
   customPreview?: React.ReactNode;
   programPreview?: React.ReactNode;
+  /** Bump saat take-to-air agar animasi IN/OUT di monitor program diputar ulang */
+  programPlayKey?: number;
   onPlayAction?: () => void;
   playStatus?: 0 | 1 | 2;
   activeAssets?: PanelControlMonitorActiveAsset[];
@@ -32,6 +35,7 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
   userRole = 'admin', 
   customPreview, 
   programPreview,
+  programPlayKey = 0,
   onPlayAction,
   playStatus = 0,
   activeAssets,
@@ -263,17 +267,22 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                         className="w-[1920px] h-[1080px] shrink-0 flex items-center justify-center origin-center pointer-events-none transition-transform duration-200 ease-out relative"
                         style={{ transform: `scale(${currentScale})` }}
                     >
-                        <AnimatePresence mode="sync" initial={false}>
+                        <AnimatePresence mode="sync">
                           {programPreview && (
-                            <motion.div 
-                              key="program-feed-stable"
-                              initial={false}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0, transition: { duration: 0.15 } }}
-                              className="w-full h-full flex items-center justify-center pointer-events-none"
+                            <PreviewControlContext.Provider
+                              key={`program-feed-${programPlayKey}`}
+                              value={{
+                                playKey: programPlayKey,
+                                programPlayKey,
+                                isLooping,
+                                isPreviewPlaying: true,
+                                replay: () => {},
+                              }}
                             >
-                              {programPreview}
-                            </motion.div>
+                              <div className="w-full h-full flex items-center justify-center pointer-events-none">
+                                {programPreview}
+                              </div>
+                            </PreviewControlContext.Provider>
                           )}
                         </AnimatePresence>
                     </div>
@@ -461,18 +470,17 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                             className="w-[1920px] h-[1080px] shrink-0 flex items-center justify-center origin-center pointer-events-none transition-transform duration-200 ease-out relative"
                             style={{ transform: `scale(${currentScale})` }}
                         >
-                            <PreviewControlContext.Provider value={{ playKey, isLooping, isPreviewPlaying, replay }}>
-                                <AnimatePresence mode="wait" initial={false}>
+                            <PreviewControlContext.Provider
+                              value={{ playKey, programPlayKey: 0, isLooping, isPreviewPlaying, replay }}
+                            >
+                                <AnimatePresence mode="sync">
                                   {customPreview && (
-                                    <motion.div 
+                                    <div
                                       key={`preview-feed-${playKey}`}
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0, transition: { duration: 0.2 } }}
                                       className="w-full h-full flex items-center justify-center pointer-events-none"
                                     >
                                       {customPreview}
-                                    </motion.div>
+                                    </div>
                                   )}
                                 </AnimatePresence>
                             </PreviewControlContext.Provider>
@@ -579,7 +587,9 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                                 exit={{ opacity: 0, transition: { duration: 1.2 } }}
                                 className="w-full h-full pointer-events-none"
                             >
-                                <PreviewControlContext.Provider value={{ playKey, isLooping, isPreviewPlaying, replay }}>
+                                <PreviewControlContext.Provider
+                                  value={{ playKey, programPlayKey: 0, isLooping, isPreviewPlaying, replay }}
+                                >
                                     {React.isValidElement(customPreview) 
                                         ? React.cloneElement(customPreview as React.ReactElement, { key: 'expanded-preview-element' }) 
                                         : customPreview}

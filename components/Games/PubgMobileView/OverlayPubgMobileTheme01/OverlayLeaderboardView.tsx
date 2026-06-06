@@ -134,7 +134,11 @@ const DEFAULT_ELIMINATION_BANNER_LAYOUT: EliminationBannerLayout = {
 import {
   AnimationConfig,
   ANIMATION_PRESETS,
-  getAnimationVariants,
+  getAnimationSignature,
+  getRootMotionProps,
+  getChildMotionInitial,
+  getChildMotionExit,
+  getMotionEase,
   resolveAnimationConfig,
 } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
@@ -238,6 +242,8 @@ interface OverlayLeaderboardViewProps {
   getAssetStatusProp?: (id: string) => number;
   onPreviewContentChange?: (content: React.ReactNode) => void;
   visualOnly?: boolean;
+  monitorFeed?: boolean;
+  feedPlayKey?: number;
   style?: React.CSSProperties;
 }
 
@@ -268,9 +274,14 @@ const ELIMINATED_POPUP_EASE_IN: [number, number, number, number] = [0.22, 1, 0.3
 const ELIMINATED_POPUP_EASE_OUT: [number, number, number, number] = [0.33, 1, 0.68, 1];
 const ELIMINATED_POPUP_HOLD_MS = 3400;
 
-/** Final Four: aktif saat 4 tim tersisa, lanjut 3→2 (tengah), tanpa banner elim & klasemen kanan */
+/** Endgame overlay atas: tim tersisa ≤4 (4→1), ganti klasemen kanan & banner elim */
 const FINAL_FOUR_ALIVE_COUNT = 4;
-const FINAL_FOUR_MIN_ALIVE_COUNT = 2;
+const FINAL_FOUR_MIN_ALIVE_COUNT = 1;
+
+const isEndgameTopOverlayCount = (count: number) =>
+  count <= FINAL_FOUR_ALIVE_COUNT && count >= FINAL_FOUR_MIN_ALIVE_COUNT;
+/** Tahan kartu terakhir (1 tim) lalu transisi keluar */
+const FINAL_FOUR_SOLO_EXIT_DELAY_MS = 3200;
 const FINAL_FOUR_TOP_OFFSET_PX = 56;
 const FINAL_FOUR_PANEL_EXIT_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const FINAL_FOUR_ENTER_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -662,7 +673,7 @@ const INITIAL_VISUAL_CONFIG: VisualConfig = {
 
 const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({ 
   asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
-  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
+  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, monitorFeed = false, feedPlayKey, style
 }) => {
   useOverlayFonts();
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
@@ -731,11 +742,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   );
   const eliminationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eliminationQueueRef = useRef<TeamEliminationAlert[]>([]);
-  const finalFourPhaseActiveRef = useRef(false);
-  const [finalFourPhaseActive, setFinalFourPhaseActive] = useState(false);
   const eliminationShowingRef = useRef(false);
   const seenEliminationsRef = useRef<Set<string>>(new Set());
   const eliminationsInitializedRef = useRef(false);
+  const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
   const [isTieBreakerModalOpen, setIsTieBreakerModalOpen] = useState(false);
@@ -766,14 +777,17 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const [dbSearch, setDbSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const { replay } = React.useContext(PreviewControlContext);
+  const { replay, playKey } = React.useContext(PreviewControlContext);
 
   const handleSave = () => {
     setIsSaving(true);
     
     // Commit draft to shared state
-    setAnimationConfig(draftAnimationConfig);
+    setAnimationConfig({ ...draftAnimationConfig, mode: draftAnimationConfig.mode ?? 'custom' });
     
+    if (programAssetId === asset.id) {
+      setProgramPlayKey((k) => k + 1);
+    }
     // Briefly delay replay to allow state to propagate
     if (replay) {
       setTimeout(() => replay(), 100);
@@ -951,6 +965,19 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [animationConfig, presetOverrides]
   );
 
+  const activeAnimConfig = useMemo(
+    () =>
+      visualOnly || monitorFeed
+        ? effectiveAnimationConfig
+        : resolveAnimationConfig(draftAnimationConfig, presetOverrides, ANIMATION_PRESETS),
+    [visualOnly, monitorFeed, effectiveAnimationConfig, draftAnimationConfig, presetOverrides]
+  );
+
+  const rootMotionProps = useMemo(
+    () => getRootMotionProps(activeAnimConfig),
+    [activeAnimConfig]
+  );
+
   // Push transition settings to OBS / output links (separate browser storage)
   useEffect(() => {
     if (visualOnly) return;
@@ -963,9 +990,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const [showOverlay, setShowOverlay] = useState(true);
   const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
+  const [programPlayKey, setProgramPlayKey] = useState(0);
   
   const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
   const setProgramAssetId = (id: string | null) => {
+    if (id) setProgramPlayKey((k) => k + 1);
     if (onProgramAssetChange) onProgramAssetChange(id);
     else setInternalProgramAssetId(id);
   };
@@ -1051,6 +1080,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       if (eliminationClearTimerRef.current) {
         clearTimeout(eliminationClearTimerRef.current);
       }
+      if (finalFourSoloExitTimerRef.current) {
+        clearTimeout(finalFourSoloExitTimerRef.current);
+      }
     };
   }, []);
 
@@ -1071,22 +1103,33 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   );
   const survivingMatchCount = survivingMatchTeams.length;
 
-  useEffect(() => {
-    if (survivingMatchCount === FINAL_FOUR_ALIVE_COUNT) {
-      finalFourPhaseActiveRef.current = true;
-      setFinalFourPhaseActive(true);
-    }
-    if (survivingMatchCount < FINAL_FOUR_MIN_ALIVE_COUNT) {
-      finalFourPhaseActiveRef.current = false;
-      setFinalFourPhaseActive(false);
-    }
-  }, [survivingMatchCount]);
+  /** Fase endgame (≤4 tim): sembunyikan klasemen kanan & banner elim */
+  const isEndgamePhase = isEndgameTopOverlayCount(survivingMatchCount);
+  /** Bar WWCD atas — saat 1 tim: tahan 3,2s lalu transisi keluar */
+  const showFinalFourTopBar = isEndgamePhase && finalFourTopBarVisible;
 
-  /** Fase Final Four (4→3→2): bar atas tetap tengah, tanpa klasemen kanan & banner elim */
-  const showFinalFourOverlay =
-    finalFourPhaseActive &&
-    survivingMatchCount >= FINAL_FOUR_MIN_ALIVE_COUNT &&
-    survivingMatchCount <= FINAL_FOUR_ALIVE_COUNT;
+  useEffect(() => {
+    if (finalFourSoloExitTimerRef.current) {
+      clearTimeout(finalFourSoloExitTimerRef.current);
+      finalFourSoloExitTimerRef.current = null;
+    }
+
+    if (!isEndgamePhase) {
+      setFinalFourTopBarVisible(false);
+      return;
+    }
+
+    if (survivingMatchCount === 1) {
+      setFinalFourTopBarVisible(true);
+      finalFourSoloExitTimerRef.current = setTimeout(() => {
+        setFinalFourTopBarVisible(false);
+        finalFourSoloExitTimerRef.current = null;
+      }, FINAL_FOUR_SOLO_EXIT_DELAY_MS);
+      return;
+    }
+
+    setFinalFourTopBarVisible(true);
+  }, [isEndgamePhase, survivingMatchCount]);
   /** Bisa lanjut match berikutnya jika tersisa ≤2 tim tanpa placement (WWCD / top 2) */
   const isMatchReadyToEnd = contentionCount <= 2;
   const matchWinnerCandidate = useMemo(() => {
@@ -1172,7 +1215,13 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       if (seenEliminationsRef.current.has(dedupeKey)) return;
       seenEliminationsRef.current.add(dedupeKey);
 
-      if (finalFourPhaseActiveRef.current) {
+      const survivingAfter = teamsSnapshot.filter(
+        (t) =>
+          t.active &&
+          t.placementRank === null &&
+          !t.status.every((s) => s === 0)
+      ).length;
+      if (isEndgameTopOverlayCount(survivingAfter)) {
         return;
       }
 
@@ -1182,13 +1231,8 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       eliminationQueueRef.current.push(alert);
       playNextEliminationBanner();
     },
-    [buildTeamEliminationBanner, playNextEliminationBanner]
+    [buildTeamEliminationAlert, playNextEliminationBanner]
   );
-
-  const resetFinalFourPhase = useCallback(() => {
-    finalFourPhaseActiveRef.current = false;
-    setFinalFourPhaseActive(false);
-  }, []);
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
@@ -1352,10 +1396,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     : eliminationAlert;
 
   const showEliminationBanner =
-    elimBannerHoldPreview || (!showFinalFourOverlay && displayElimAlert !== null);
+    elimBannerHoldPreview || (!isEndgamePhase && displayElimAlert !== null);
 
   useEffect(() => {
-    if (!showFinalFourOverlay || elimBannerHoldPreview) return;
+    if (!isEndgamePhase || elimBannerHoldPreview) return;
     if (eliminationClearTimerRef.current) {
       clearTimeout(eliminationClearTimerRef.current);
       eliminationClearTimerRef.current = null;
@@ -1365,7 +1409,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     setEliminationAlert(null);
     pushEliminationToCompanion(null);
   }, [
-    showFinalFourOverlay,
+    isEndgamePhase,
     elimBannerHoldPreview,
     pushEliminationToCompanion,
     setEliminationAlert,
@@ -1938,7 +1982,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     seenEliminationsRef.current.clear();
     eliminationQueueRef.current = [];
     eliminationShowingRef.current = false;
-    resetFinalFourPhase();
     if (!visualOnly) {
       setFraggers([
         { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
@@ -1971,7 +2014,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         seenEliminationsRef.current.clear();
         eliminationQueueRef.current = [];
         eliminationShowingRef.current = false;
-        resetFinalFourPhase();
         setFraggers([
           { rank: 1, name: 'PLAYER 1', team: 'TEAM A', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
           { rank: 2, name: 'PLAYER 2', team: 'TEAM B', teamLogo: '', elims: 0, damage: 0, survival: '0 M 00 S', image: '' },
@@ -2012,7 +2054,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     seenEliminationsRef.current.clear();
     eliminationQueueRef.current = [];
     eliminationShowingRef.current = false;
-    resetFinalFourPhase();
   };
 
   const confirmEndMatchExecution = () => {
@@ -2191,7 +2232,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   );
 
   const finalFourTeamsData = useMemo(() => {
-    if (!showFinalFourOverlay) return [];
+    if (!isEndgamePhase) return [];
     const totalAlivePlayers = survivingMatchTeams.reduce(
       (sum, t) => sum + countAlivePlayers(t.status),
       0
@@ -2218,11 +2259,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         };
       })
       .sort((a, b) => (a.wwcdPosition ?? 99) - (b.wwcdPosition ?? 99));
-  }, [showFinalFourOverlay, survivingMatchTeams, sortedPreviewTeams, projectPlayers]);
-
-  const getAssetAnimationVariants = useCallback(() => {
-    return getAnimationVariants(effectiveAnimationConfig);
-  }, [effectiveAnimationConfig]);
+  }, [isEndgamePhase, survivingMatchTeams, sortedPreviewTeams, projectPlayers]);
 
   const rowVariants = useMemo(() => ({
     initial: { x: 20, opacity: 0 },
@@ -2663,7 +2700,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     );
   }, [
     showOverlay,
-    showFinalFourOverlay,
+    isEndgamePhase,
     showElimsColumn,
     layoutConfig,
     leaderboardPanelWidth,
@@ -2684,7 +2721,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   ]);
 
   const finalFourOverlayPanel = useMemo(() => {
-    if (!showOverlay || !showFinalFourOverlay || finalFourTeamsData.length === 0) {
+    if (!showOverlay || !isEndgamePhase || finalFourTeamsData.length === 0) {
       return null;
     }
 
@@ -2734,7 +2771,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     );
   }, [
     showOverlay,
-    showFinalFourOverlay,
+    isEndgamePhase,
     finalFourTeamsData,
     layoutConfig,
     visualConfig,
@@ -2762,14 +2799,19 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     ]
   );
 
-  const livePreviewContent = useMemo(
-    () => (
+  const renderLivePreview = useCallback((overrideAnimKey?: number) => {
+    const resolvedAnimKey = overrideAnimKey ?? feedPlayKey ?? playKey;
+    return (
       <motion.div
-        {...getAssetAnimationVariants()}
+        key={`leaderboard-asset-${resolvedAnimKey}-${getAnimationSignature(activeAnimConfig)}`}
+        initial={rootMotionProps.initial}
+        animate={rootMotionProps.animate}
+        exit={rootMotionProps.exit}
+        transition={rootMotionProps.transition}
         style={style}
         className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden font-sans select-none ${style?.position === 'absolute' ? '' : 'mx-auto'}`}
       >
-        {!visualOnly && (
+        {!visualOnly && !monitorFeed && (
           <div
             className="absolute inset-0 opacity-40"
             style={{
@@ -2782,41 +2824,53 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
         {showEliminationBanner && elimBannerPreviewNode}
 
-        <AnimatePresence initial={false}>
-          {showOverlay && !showFinalFourOverlay && leaderboardOverlayPanel && (
+        <AnimatePresence>
+          {showOverlay && !isEndgamePhase && leaderboardOverlayPanel && (
             <motion.div
               key="overall-ranking-panel"
               className="absolute inset-0 pointer-events-none z-[350]"
-              initial={{ x: 64, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
+              initial={getChildMotionInitial(activeAnimConfig, 120)}
+              animate={{ x: 0, y: 0, opacity: 1 }}
               exit={{
-                x: 520,
-                opacity: 0,
-                scale: 0.94,
-                transition: { duration: 0.65, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+                ...getChildMotionExit(activeAnimConfig, 120),
+                transition: {
+                  duration: activeAnimConfig.duration * 0.8,
+                  ease: getMotionEase(activeAnimConfig),
+                },
               }}
-              transition={{ duration: 0.5, ease: FINAL_FOUR_ENTER_EASE }}
+              transition={{
+                duration: activeAnimConfig.duration,
+                delay: activeAnimConfig.delay,
+                ease: getMotionEase(activeAnimConfig),
+              }}
             >
               {leaderboardOverlayPanel}
             </motion.div>
           )}
         </AnimatePresence>
 
-        <AnimatePresence initial={false}>
-          {showOverlay && showFinalFourOverlay && finalFourOverlayPanel && (
+        <AnimatePresence>
+          {showOverlay && showFinalFourTopBar && (
             <motion.div
               key="final-four-bar"
               className="absolute inset-0 pointer-events-none z-[400]"
-              initial={{ y: -120, opacity: 0 }}
+              initial={getChildMotionInitial(activeAnimConfig, 120)}
               animate={{
+                x: 0,
                 y: 0,
                 opacity: 1,
-                transition: { duration: 0.6, ease: FINAL_FOUR_ENTER_EASE, delay: 0.08 },
+                transition: {
+                  duration: activeAnimConfig.duration,
+                  delay: activeAnimConfig.delay + 0.08,
+                  ease: getMotionEase(activeAnimConfig),
+                },
               }}
               exit={{
-                y: -80,
-                opacity: 0,
-                transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
+                ...getChildMotionExit(activeAnimConfig, 120),
+                transition: {
+                  duration: activeAnimConfig.duration * 0.75,
+                  ease: getMotionEase(activeAnimConfig),
+                },
               }}
             >
               {finalFourOverlayPanel}
@@ -2824,18 +2878,28 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           )}
         </AnimatePresence>
       </motion.div>
-    ),
-    [
-      getAssetAnimationVariants,
-      style,
-      visualOnly,
-      elimBannerPreviewNode,
-      leaderboardOverlayPanel,
-      finalFourOverlayPanel,
-      showOverlay,
-      showFinalFourOverlay,
-      showEliminationBanner,
-    ]
+    );
+  }, [
+    activeAnimConfig,
+    rootMotionProps,
+    style,
+    visualOnly,
+    monitorFeed,
+    elimBannerPreviewNode,
+    leaderboardOverlayPanel,
+    finalFourOverlayPanel,
+    showOverlay,
+    isEndgamePhase,
+    showFinalFourTopBar,
+    showEliminationBanner,
+    feedPlayKey,
+    playKey,
+  ]);
+
+  const livePreviewContent = useMemo(() => renderLivePreview(), [renderLivePreview]);
+  const programFeedContent = useMemo(
+    () => renderLivePreview(programPlayKey),
+    [renderLivePreview, programPlayKey]
   );
 
   // Sync preview content to parent
@@ -2846,7 +2910,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   }, [livePreviewContent, onPreviewContentChange, visualOnly]);
 
   if (visualOnly) {
-    return livePreviewContent;
+    return renderLivePreview(feedPlayKey);
   }
 
   return (
@@ -3004,8 +3068,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                                 ? 'READY: WINNER FOUND'
                                                 : contentionCount === 2
                                                   ? 'READY: TOP 2 — LANJUT MATCH'
-                                                  : showFinalFourOverlay
-                                                    ? `LIVE: FINAL ${survivingMatchCount} — BAR ATAS`
+                                                  : isEndgamePhase
+                                                    ? showFinalFourTopBar
+                                                      ? `LIVE: FINAL ${survivingMatchCount} — BAR ATAS`
+                                                      : 'LIVE: WINNER — BAR KELUAR'
                                                     : `LIVE: ${contentionCount} TIM TANPA PLACEMENT`}
                                         </span>
                                     </div>
@@ -4585,9 +4651,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           <div className={`transition-all duration-300 flex shrink-0 ${showMonitors ? 'opacity-100' : 'w-0 opacity-0 pointer-events-none'}`}>
             <PanelControlMonitor 
               userRole={userRole} 
-              customPreview={livePreviewContent} 
+              customPreview={livePreviewContent}
+              programPlayKey={programPlayKey}
               programPreview={
-                programAssetId === asset.id ? livePreviewContent : (
+                programAssetId === asset.id ? programFeedContent : (
                   programAssetId ? (
                     <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
                       <h2 className="text-4xl font-black text-[#ccff00] mb-4">ASSET PLAYING</h2>

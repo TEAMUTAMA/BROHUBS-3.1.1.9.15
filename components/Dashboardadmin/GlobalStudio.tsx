@@ -3,6 +3,7 @@ import { Game, Theme, Asset, Project } from '../../types';
 import { ASSET_DATABASE } from '../../constants/assets';
 import OverlayTopFraggersView from '../Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from '../Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayLeaderboardView';
+import OverlayTeamRosterView from '../Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTeamRosterView';
 import PanelControlMonitor from '../PanelControlMonitor';
 import { LayoutTemplate, Monitor, Settings2, ChevronDown, Gamepad2, Palette, Layers, Eye, EyeOff, Play, Square, Keyboard, Radio, Copy, Check, ExternalLink, HelpCircle, Info, X, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -31,6 +32,17 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
   const [assetLayerSelection, setAssetLayerSelection] = useSharedState<Record<string, number | null>>(`BROHUBS_STUDIO_ASSET_LAYERS_${project?.id || 'GLOBAL'}`, {});
   const [showList, setShowList] = useState(true);
   const [showMonitor, setShowMonitor] = useState(true);
+  /** Play key per layer — untuk remount animasi internal (roster); di-bump sinkron saat take-to-air */
+  const [programLayerPlayKeys, setProgramLayerPlayKeys] = useState<Record<number, number>>({});
+  /** Play key preview monitor — agar animasi staging identik dengan program */
+  const [previewFeedKey, setPreviewFeedKey] = useState(0);
+
+  const bumpProgramLayerPlayKey = useCallback((layer: number) => {
+    setProgramLayerPlayKeys((keys) => ({
+      ...keys,
+      [layer]: (keys[layer] ?? 0) + 1,
+    }));
+  }, []);
 
   // Bitfocus Companion connection & integration states
   const [showCompanionModal, setShowCompanionModal] = useState(false);
@@ -75,12 +87,14 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       const saved = localStorage.getItem('BROHUBS_STUDIO_HOTKEYS');
       return saved ? JSON.parse(saved) : {
         'pmgc-fraggers': 'F',
-        'pmgc-leaderboard': 'L'
+        'pmgc-leaderboard': 'L',
+        'pmgc-team-roster': 'R',
       };
     } catch (e) {
       return {
         'pmgc-fraggers': 'F',
-        'pmgc-leaderboard': 'L'
+        'pmgc-leaderboard': 'L',
+        'pmgc-team-roster': 'R',
       };
     }
   });
@@ -194,6 +208,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       } else {
         // Status 0 or 1 -> Status 2 (PROGRAM)
         setPreviewAssetId(null); // Ensure it's not in preview anymore
+        bumpProgramLayerPlayKey(selectedLayer);
         setProgramLayers(prev => {
           const newLayers = { ...prev };
           // Remove from other layers if it was playing elsewhere
@@ -223,10 +238,11 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           });
           notifyCompanionTrigger(assetId, 'stop');
         }
+        setPreviewFeedKey((k) => k + 1);
         setPreviewAssetId(assetId);
       }
     }
-  }, [programLayers, previewAssetId]);
+  }, [programLayers, previewAssetId, bumpProgramLayerPlayKey]);
 
   const getAssetStatus = useCallback((assetId: string) => {
     if (Object.values(programLayers).includes(assetId)) return 2; // PROGRAM
@@ -352,6 +368,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     if (action === 'play') {
       const activeLayer = layer || assetLayerSelectionRef.current[resolvedAssetId] || 1;
       setPreviewAssetId(null);
+      bumpProgramLayerPlayKey(activeLayer);
       setProgramLayers(prev => {
         const newLayers = { ...prev };
         Object.keys(newLayers).forEach(key => {
@@ -372,6 +389,8 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     } else if (action === 'toggle') {
       if (layer !== undefined && layer > 0) {
         setPreviewAssetId(null);
+        const isRemoving = programLayers[layer] === resolvedAssetId;
+        if (!isRemoving) bumpProgramLayerPlayKey(layer);
         setProgramLayers(prev => {
           const newLayers = { ...prev };
           if (newLayers[layer] === resolvedAssetId) {
@@ -388,7 +407,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
         handlePlayAsset(resolvedAssetId);
       }
     }
-  }, [programLayers, previewAssetId, handlePlayAsset]);
+  }, [programLayers, previewAssetId, handlePlayAsset, bumpProgramLayerPlayKey]);
 
   // Keep a ref of the trigger callback to avoid reconnecting SSE on every state change
   const handleCompanionTriggerRef = useRef(handleCompanionTrigger);
@@ -446,7 +465,11 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     if (onBack && !isLive) onBack();
   }, [onBack, isLive]);
 
-  const renderProgramAsset = useCallback((id: string | null, style?: React.CSSProperties, overrideKey?: string) => {
+  const renderProgramAsset = useCallback((
+    id: string | null,
+    overrideKey?: string,
+    feedPlayKey?: number
+  ) => {
     if (!id) return null;
     const assetToPlay = ASSET_DATABASE.find(a => a.id === id);
     if (!assetToPlay) return null;
@@ -454,6 +477,12 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     // Use the same theme as selected or a default for the game
     const themeToUse = themes.find(t => t.id === selectedThemeId) || themes.find(t => t.gameId === assetToPlay.gameId);
     if (!themeToUse) return null;
+
+    const monitorFeedProps = {
+      visualOnly: true as const,
+      monitorFeed: true,
+      feedPlayKey,
+    };
 
     if (assetToPlay.gameId === 'pubg') {
       if (assetToPlay.id === 'pmgc-fraggers') {
@@ -470,8 +499,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             globalLogo={globalLogo}
             projectPlayers={project?.players || []}
             isGlobalStudio={true}
-            visualOnly={true}
-            style={style}
+            {...monitorFeedProps}
           />
         );
       }
@@ -489,8 +517,25 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             globalLogo={globalLogo}
             projectPlayers={project?.players || []}
             isGlobalStudio={true}
-            visualOnly={true}
-            style={style}
+            {...monitorFeedProps}
+          />
+        );
+      }
+      if (assetToPlay.id === 'pmgc-team-roster') {
+        return (
+          <OverlayTeamRosterView
+            key={overrideKey || assetToPlay.id}
+            asset={assetToPlay}
+            theme={themeToUse}
+            games={games}
+            themes={themes}
+            availableAssets={ASSET_DATABASE}
+            userRole={userRole}
+            onBack={handleBack}
+            globalLogo={globalLogo}
+            projectPlayers={project?.players || []}
+            isGlobalStudio={true}
+            {...monitorFeedProps}
           />
         );
       }
@@ -506,36 +551,51 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     [programLayers]
   );
 
-  const programPreviewNode = useMemo(
-    () => (
-      <div className="absolute inset-0 pointer-events-none">
-        {programLayerList.map(([layer, assetId]) => (
-          <div
-            key={`layer-${layer}-${assetId}`}
-            className="absolute inset-0"
-            style={{ zIndex: Number(layer) }}
-          >
-            {renderProgramAsset(
-              assetId,
-              { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
-              `layer-${layer}-${assetId}`
-            )}
-          </div>
-        ))}
-      </div>
-    ),
-    [programLayerList, renderProgramAsset]
+  const programMonitorPlayKey = useMemo(
+    () => Object.values(programLayerPlayKeys).reduce((sum, key) => sum + key, 0),
+    [programLayerPlayKeys]
   );
+
+  const programPreviewNode = useMemo(() => {
+    if (programLayerList.length === 0) return null;
+
+    return (
+      <div className="absolute inset-0 pointer-events-none">
+        {programLayerList.map(([layer, assetId]) => {
+          const layerPlayKey = programLayerPlayKeys[Number(layer)] ?? 0;
+          return (
+            <div
+              key={`layer-slot-${layer}`}
+              className="absolute inset-0"
+              style={{ zIndex: Number(layer) }}
+            >
+              <AnimatePresence mode="sync">
+                {renderProgramAsset(
+                  assetId,
+                  `layer-${layer}-${assetId}-${layerPlayKey}`,
+                  layerPlayKey
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [programLayerList, renderProgramAsset, programLayerPlayKeys]);
 
   const stagingPreviewNode = useMemo(() => {
     if (!previewAssetId) return null;
-    return renderProgramAsset(previewAssetId, undefined, `preview-${previewAssetId}`);
-  }, [previewAssetId, renderProgramAsset]);
+    return renderProgramAsset(
+      previewAssetId,
+      `preview-${previewAssetId}-${previewFeedKey}`,
+      previewFeedKey
+    );
+  }, [previewAssetId, previewFeedKey, renderProgramAsset]);
 
   const customPreviewNode = useMemo(
     () => (
       <div className="w-full h-full relative overflow-hidden">
-        <AnimatePresence mode="wait" initial={false}>
+        <AnimatePresence mode="sync">
           {stagingPreviewNode}
         </AnimatePresence>
       </div>
@@ -578,6 +638,26 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       if (activeAsset.id === 'pmgc-leaderboard') {
         return (
             <OverlayLeaderboardView
+              asset={activeAsset}
+              theme={activeTheme}
+              games={games}
+              themes={filteredThemes}
+              availableAssets={filteredAssets}
+              userRole={userRole}
+              onBack={handleBack}
+              globalLogo={globalLogo}
+              projectPlayers={project?.players || []}
+              isGlobalStudio={true}
+              showMonitorProp={false}
+              programAssetIdProp={Object.values(programLayers).includes(activeAsset.id) ? activeAsset.id : null}
+              onProgramAssetChange={handlePlayAsset}
+              getAssetStatusProp={getAssetStatus}
+            />
+        );
+      }
+      if (activeAsset.id === 'pmgc-team-roster') {
+        return (
+            <OverlayTeamRosterView
               asset={activeAsset}
               theme={activeTheme}
               games={games}
@@ -908,6 +988,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               playStatus={getAssetStatus(selectedAssetId)}
               customPreview={customPreviewNode}
               programPreview={programPreviewNode}
+              programPlayKey={programMonitorPlayKey}
               activeAssets={
                 [
                   ...(previewAssetId ? [{
