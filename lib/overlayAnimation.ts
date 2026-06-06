@@ -11,6 +11,10 @@ export const ASSET_ANIMATION_STORAGE: Record<
   'pmgc-fraggers': {
     animationKey: 'BROHUBS_TOPFRAGGERS_ANIMATION',
   },
+  'pmgc-team-roster': {
+    animationKey: 'BROHUBS_TEAMROSTER_ANIMATION',
+    presetOverridesKey: 'BROHUBS_TEAMROSTER_PRESET_OVERRIDES',
+  },
 };
 
 export interface CompanionAnimationPayload {

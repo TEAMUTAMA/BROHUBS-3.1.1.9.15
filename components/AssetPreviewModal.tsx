@@ -100,7 +100,67 @@ const AssetPreviewModal: React.FC<AssetPreviewModalProps> = ({ asset, theme, onC
       );
     }
 
-    // 3. LEADERBOARD / STANDINGS PREVIEW
+    // 3. TEAM ROSTER PREVIEW
+    if (assetId.includes('team-roster') || assetId.includes('roster')) {
+      const clip = 'polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)';
+      const previewTeams = [
+        { name: 'ASI8', players: ['GHANTAGAMII', 'NEW', 'PLAYER 3'], body: '#e8e6df' },
+        { name: 'HORAA', players: ['WISER', 'SANTEY', 'PLAYER 3', 'PLAYER 4', 'PLAYER 5'], body: '#dcdcdc' },
+        { name: '4T', players: ['PLAYER 1'], body: '#e8e6df' },
+        { name: '313', players: ['PLAYER 1', 'PLAYER 2'], body: '#dcdcdc' },
+      ];
+      return (
+        <div className="w-full h-full flex flex-col p-12 animate-in fade-in duration-700 relative">
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{ background: 'radial-gradient(ellipse 50% 40% at 15% 20%, #74a57f22 0%, transparent 70%)' }}
+          />
+          <div className="flex items-end justify-between mb-10 relative z-10">
+            <div>
+              <h1 className="text-[#74a57f] font-[1000] uppercase leading-none text-5xl md:text-6xl tracking-tighter drop-shadow-lg">
+                TEAM ROSTERS
+              </h1>
+              <div className="h-1 mt-3 w-56 bg-gradient-to-r from-[#74a57f] to-transparent" />
+            </div>
+            <div className="text-right space-y-2">
+              <div className="bg-[#74a57f] px-5 py-1.5 -skew-x-12 shadow-lg">
+                <p className="text-white font-bold uppercase text-sm tracking-[0.3em] skew-x-12">ROUND ROBIN FINALS</p>
+              </div>
+              <p className="text-white/70 text-xs font-bold tracking-widest border border-white/20 px-3 py-1 inline-block">&lt; 1 / 2 &gt;</p>
+            </div>
+          </div>
+          <div className="flex gap-5 items-stretch justify-center flex-1 relative z-10">
+            {previewTeams.map((team) => (
+              <div
+                key={team.name}
+                className="w-52 flex flex-col shadow-[0_20px_40px_rgba(0,0,0,0.4)]"
+                style={{ clipPath: clip }}
+              >
+                <div className="bg-[#74a57f] flex-[2] flex flex-col items-center justify-between py-5 px-3 relative">
+                  <span className="absolute top-2 right-2 text-[8px] font-black text-white/80 bg-black/20 px-1.5 py-0.5">
+                    {team.players.length}/5
+                  </span>
+                  <div className="w-16 h-16 bg-[#a3cfaa] flex items-center justify-center mt-2" style={{ clipPath: 'polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px)' }}>
+                    <Shield size={28} className="text-white/80" />
+                  </div>
+                  <h3 className="text-white font-[1000] text-xl uppercase">{team.name}</h3>
+                </div>
+                <div className="flex-1 flex flex-col justify-center px-3 py-3 gap-1.5" style={{ backgroundColor: team.body }}>
+                  {team.players.map((p, i) => (
+                    <div key={p} className="flex items-center gap-2 px-1.5 py-1.5 bg-black/[0.04] border-l-2 border-[#74a57f]">
+                      <span className="w-6 h-6 bg-[#74a57f] text-white text-[8px] font-black flex items-center justify-center">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="text-black font-bold uppercase text-[10px] truncate">{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // 4. LEADERBOARD / STANDINGS PREVIEW
     if (assetId.includes('leaderboard') || assetId.includes('standings')) {
         return (
             <div className="w-full h-full flex items-center justify-center p-12">

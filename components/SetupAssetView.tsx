@@ -10,6 +10,7 @@ import { ASSET_DATABASE } from '../constants/assets';
 import PanelControlMonitor from './PanelControlMonitor';
 import OverlayTopFraggersView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
 import OverlayLeaderboardView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayLeaderboardView';
+import OverlayTeamRosterView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTeamRosterView';
 
 interface SetupAssetViewProps {
   games: Game[];
@@ -106,6 +107,20 @@ const SetupAssetView: React.FC<SetupAssetViewProps> = ({ games, themes, userRole
       );
     }
 
+    if (selectedAssetId === 'pmgc-team-roster') {
+      return (
+        <OverlayTeamRosterView 
+          asset={activeAsset as Asset} 
+          theme={activeTheme as Theme} 
+          games={games} 
+          themes={gameSpecificThemes} 
+          availableAssets={gameSpecificAssets} 
+          userRole={userRole} 
+          onBack={() => setSelectedAssetId(null)} 
+        />
+      );
+    }
+
     return (
       <div className="w-full h-full bg-[#050505] relative overflow-hidden flex flex-col items-center justify-center">
          <div className="text-center mb-10">
@@ -151,6 +166,21 @@ const SetupAssetView: React.FC<SetupAssetViewProps> = ({ games, themes, userRole
     if (selectedAssetId === 'pmgc-leaderboard') {
       return (
         <OverlayLeaderboardView 
+          asset={activeAsset as Asset} 
+          theme={activeTheme as Theme} 
+          games={games} 
+          themes={gameSpecificThemes} 
+          availableAssets={gameSpecificAssets} 
+          userRole={userRole} 
+          onBack={() => setSelectedAssetId(null)} 
+          onSelectAsset={(asset) => setSelectedAssetId(asset.id)}
+        />
+      );
+    }
+
+    if (selectedAssetId === 'pmgc-team-roster') {
+      return (
+        <OverlayTeamRosterView 
           asset={activeAsset as Asset} 
           theme={activeTheme as Theme} 
           games={games} 
