@@ -1,0 +1,61 @@
+---
+description: Lindungi kode yang sudah fix — jangan ubah kecuali diminta atau benar-benar terkait
+alwaysApply: true
+---
+
+# Preserve Fixed Code
+
+## Prinsip Utama
+
+Kode yang sudah **fix**, **stabil**, atau **sudah disetujui user** adalah **read-only by default**.
+Jangan sentuh kecuali ada alasan eksplisit.
+
+## Kapan BOLEH Mengubah
+
+1. User **secara eksplisit** meminta perubahan di file/fungsi tersebut
+2. Perubahan **wajib** untuk menyelesaikan task yang diminta (dependensi langsung)
+3. Bug baru **terbukti** berasal dari kode tersebut (dengan bukti, bukan asumsi)
+
+## Kapan TIDAK BOLEH Mengubah
+
+- Refactor "biar rapi" tanpa diminta
+- Rename, reorder import, atau format ulang file yang tidak terkait task
+- "Improvement" atau optimasi di area yang sudah fix
+- Menyentuh overlay/animasi/logic visual yang sudah final kecuali user minta
+- Menggabungkan beberapa fix jadi satu diff besar
+
+## Sebelum Edit
+
+1. Baca diff git — pahami apa yang sudah berubah dan mengapa
+2. Identifikasi **scope minimal**: file dan baris yang benar-benar perlu diubah
+3. Jika task hanya butuh 1 file, jangan buka/edit file lain
+
+## Saat Edit
+
+- **Diff kecil dan fokus** — hanya baris yang terkait task
+- **Jangan hapus atau tulis ulang** blok kode yang sudah fix; tambah/extend jika memungkinkan
+- **Pertahankan** naming, struktur, dan pola yang sudah ada
+- Jika harus menyentuh kode fix: jelaskan singkat **mengapa** di respons
+
+## Setelah Edit
+
+- Jangan revert perubahan user yang tidak terkait task
+- Jangan "cleanup" file lain yang kebetulan terbuka
+
+## Contoh
+
+```
+❌ User: "Tambah animasi di OverlayTopFraggers"
+   → Jangan refactor OverlayLeaderboardView, FinalFourTeamCard, atau lib/overlayAnimation.ts
+     kecuali animasi baru benar-benar butuh hook dari sana
+
+✅ User: "Fix leaderboard ranking salah"
+   → Hanya edit logic ranking di file terkait, jangan ubah styling/animasi yang sudah OK
+```
+
+## Commit & Revert (untuk user)
+
+Agar perubahan bisa ditarik kembali meski sudah jauh:
+- Commit **sering** dengan pesan jelas per fitur/fix
+- Satu commit = satu concern (overlay, roster, animasi, dll.)
+- Gunakan branch per fitur; merge setelah stabil
