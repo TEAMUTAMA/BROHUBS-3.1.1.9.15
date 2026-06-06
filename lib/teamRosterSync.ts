@@ -211,10 +211,9 @@ export function buildRosterTeamsFromLeaderboard(
     });
   }
 
-  return normalizeRosterTeams(built.sort((a, b) => a.name.localeCompare(b.name)));
+  return sortRosterTeamsByLeaderboardRank(normalizeRosterTeams(built));
 }
 
-/** Pemain yang ditampilkan di overlay (maks 5) */
 export function getDisplayPlayerEntries(
   players: Array<string | RosterPlayerEntry>
 ): RosterPlayerEntry[] {
@@ -246,6 +245,16 @@ export function mergeLeaderboardRanksIntoRoster(
   });
 }
 
+/** Urutan tampilan & paginasi — ikut slot Overall Ranking, tanpa rank di akhir */
+export function sortRosterTeamsByLeaderboardRank(teams: RosterTeam[]): RosterTeam[] {
+  return [...teams].sort((a, b) => {
+    const ra = a.leaderboardRank ?? Number.POSITIVE_INFINITY;
+    const rb = b.leaderboardRank ?? Number.POSITIVE_INFINITY;
+    if (ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function rosterTeamsFromProjectDb(
   projectPlayers: PlayerData[],
   leaderboardTeams: LeaderboardTeamForRoster[] = []
@@ -253,7 +262,9 @@ export function rosterTeamsFromProjectDb(
   const fromProject = buildRosterTeamsFromProject(projectPlayers);
   if (!fromProject.length) return [];
   const withRanks = mergeLeaderboardRanksIntoRoster(fromProject, leaderboardTeams);
-  return normalizeRosterTeams(enrichRosterImagesFromProject(withRanks, projectPlayers));
+  return sortRosterTeamsByLeaderboardRank(
+    normalizeRosterTeams(enrichRosterImagesFromProject(withRanks, projectPlayers))
+  );
 }
 
 export function paginateRosterTeams(

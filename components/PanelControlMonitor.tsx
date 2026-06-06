@@ -269,20 +269,25 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                     >
                         <AnimatePresence mode="sync">
                           {programPreview && (
-                            <PreviewControlContext.Provider
+                            <motion.div
                               key={`program-feed-${programPlayKey}`}
-                              value={{
-                                playKey: programPlayKey,
-                                programPlayKey,
-                                isLooping,
-                                isPreviewPlaying: true,
-                                replay: () => {},
-                              }}
+                              className="w-full h-full flex items-center justify-center pointer-events-none"
+                              initial={false}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 1, transition: { when: 'afterChildren' } }}
                             >
-                              <div className="w-full h-full flex items-center justify-center pointer-events-none">
+                              <PreviewControlContext.Provider
+                                value={{
+                                  playKey: programPlayKey,
+                                  programPlayKey,
+                                  isLooping,
+                                  isPreviewPlaying: true,
+                                  replay: () => {},
+                                }}
+                              >
                                 {programPreview}
-                              </div>
-                            </PreviewControlContext.Provider>
+                              </PreviewControlContext.Provider>
+                            </motion.div>
                           )}
                         </AnimatePresence>
                     </div>
@@ -475,12 +480,15 @@ const PanelControlMonitor: React.FC<PanelControlMonitorProps> = ({
                             >
                                 <AnimatePresence mode="sync">
                                   {customPreview && (
-                                    <div
+                                    <motion.div
                                       key={`preview-feed-${playKey}`}
                                       className="w-full h-full flex items-center justify-center pointer-events-none"
+                                      initial={false}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 1, transition: { when: 'afterChildren' } }}
                                     >
                                       {customPreview}
-                                    </div>
+                                    </motion.div>
                                   )}
                                 </AnimatePresence>
                             </PreviewControlContext.Provider>
