@@ -17,6 +17,7 @@ const LEADERBOARD_OWNED_KEYS = new Set([
   'BROHUBS_LEADERBOARD_MATCH_KILL_RULES',
   'BROHUBS_LEADERBOARD_KILL_LOG',
   'BROHUBS_ELIMINATION_BANNER_LAYOUT',
+  'BROHUBS_FINAL_FOUR_LAYOUT',
 ]);
 
 export function applyCompanionDataPayload(payload: CompanionDataPayload): void {

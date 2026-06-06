@@ -1,27 +1,21 @@
 import React from 'react';
 import { Shield } from 'lucide-react';
 import { PubgLevel3HelmetIcon } from './PubgLevel3HelmetIcon';
+import {
+  pickFinalFourColors,
+  resolveFinalFourCardSurface,
+  type FinalFourVisualFields,
+} from '@/lib/finalFourOverlayVisual';
 
-/** Palet & ukuran disesuaikan ke referensi desain WWCD card */
 const CARD_W = 388;
 const CARD_H = 128;
 const TAG_H = 38;
 const LEFT_W = 132;
 const TAG_DIAG = 22;
 
-const C = {
-  tagGreen: '#5B835B',
-  panelDark: '#141414',
-  panelRow: '#1A1A1A',
-  wwcdGreen: '#66BB6A',
-  border: 'rgba(255,255,255,0.14)',
-} as const;
-
-/** Sudut chamfer seperti referensi: potong kiri-atas & kanan-bawah */
 const CARD_CLIP =
   'polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px)';
 
-/** Trapesium tag tim — sisi kanan miring ke kanan (sesuai referensi) */
 const TAG_CLIP = `polygon(0 0, calc(100% - ${TAG_DIAG}px) 0, 100% 100%, 0 100%)`;
 
 export type FinalFourTeamCardData = {
@@ -32,13 +26,31 @@ export type FinalFourTeamCardData = {
   playerStatus: number[];
 };
 
-export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) => {
+export type FinalFourCardLayout = {
+  tagFontSize: number;
+  wwcdLabelFontSize: number;
+  wwcdPctFontSize: number;
+  fontFamily?: string;
+};
+
+export const FinalFourTeamCard = ({
+  entry,
+  visual,
+  layout,
+}: {
+  entry: FinalFourTeamCardData;
+  visual: Partial<FinalFourVisualFields>;
+  layout: FinalFourCardLayout;
+}) => {
+  const colors = pickFinalFourColors(visual);
   const statuses =
     entry.playerStatus.length >= 4
       ? entry.playerStatus.slice(0, 4)
       : [...entry.playerStatus, ...Array(4 - entry.playerStatus.length).fill(0)];
 
   const tagBlockW = LEFT_W + TAG_DIAG;
+  const cardSurface = resolveFinalFourCardSurface(visual, colors.finalFourPanelDark);
+  const fontFamily = layout.fontFamily ?? 'Oswald, sans-serif';
 
   return (
     <div
@@ -46,34 +58,37 @@ export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) =
       style={{
         width: CARD_W,
         height: CARD_H,
-        filter: `drop-shadow(0 0 0 1px ${C.border}) drop-shadow(0 10px 22px rgba(0,0,0,0.42))`,
+        filter: `drop-shadow(0 0 0 1px ${colors.finalFourBorder}) drop-shadow(0 10px 22px rgba(0,0,0,0.42))`,
       }}
     >
       <div
         className="absolute inset-0 overflow-hidden flex flex-col"
         style={{
           clipPath: CARD_CLIP,
-          backgroundColor: C.panelDark,
+          ...cardSurface,
         }}
       >
-        {/* Baris atas — tag hijau + WWCD POTENTIAL (satu baris terpadu) */}
         <div className="relative shrink-0" style={{ height: TAG_H }}>
-          <div className="absolute inset-0" style={{ backgroundColor: C.panelRow }} />
+          <div
+            className="absolute inset-0"
+            style={{ backgroundColor: colors.finalFourPanelRow }}
+          />
 
           <div
             className="absolute left-0 top-0 bottom-0 flex items-center justify-center"
             style={{
               width: tagBlockW,
-              backgroundColor: C.tagGreen,
+              backgroundColor: colors.finalFourTagGreen,
               clipPath: TAG_CLIP,
             }}
           >
             <span
-              className="font-black uppercase text-white leading-none tracking-tight select-none"
+              className="font-black uppercase leading-none tracking-tight select-none"
               style={{
-                fontSize: 23,
+                fontSize: layout.tagFontSize,
                 paddingRight: TAG_DIAG + 4,
-                fontFamily: 'Oswald, sans-serif',
+                fontFamily,
+                color: colors.finalFourTagText,
               }}
             >
               {entry.teamAbbreviation}
@@ -88,11 +103,12 @@ export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) =
             }}
           >
             <span
-              className="uppercase text-white font-bold leading-none select-none"
+              className="uppercase font-bold leading-none select-none"
               style={{
-                fontSize: 13.5,
+                fontSize: layout.wwcdLabelFontSize,
                 letterSpacing: '0.04em',
-                fontFamily: 'Oswald, sans-serif',
+                fontFamily,
+                color: colors.finalFourWwcdLabelText,
               }}
             >
               WWCD POTENTIAL
@@ -100,9 +116,9 @@ export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) =
             <span
               className="font-black tabular-nums leading-none select-none"
               style={{
-                color: C.wwcdGreen,
-                fontSize: 15,
-                fontFamily: 'Oswald, sans-serif',
+                color: colors.finalFourWwcdGreen,
+                fontSize: layout.wwcdPctFontSize,
+                fontFamily,
               }}
             >
               {Number.isFinite(entry.wwcdPotentialPct)
@@ -113,11 +129,10 @@ export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) =
           </div>
         </div>
 
-        {/* Baris bawah — logo tim & status helm */}
         <div className="flex flex-1 min-h-0">
           <div
-            className="flex items-center justify-center shrink-0 bg-white"
-            style={{ width: LEFT_W }}
+            className="flex items-center justify-center shrink-0"
+            style={{ width: LEFT_W, backgroundColor: colors.finalFourLogoBg }}
           >
             {entry.teamLogo ? (
               <img
@@ -133,10 +148,12 @@ export const FinalFourTeamCard = ({ entry }: { entry: FinalFourTeamCardData }) =
 
           <div
             className="flex-1 flex items-center justify-center gap-[11px] min-w-0"
-            style={{ backgroundColor: C.panelDark }}
+            style={{ backgroundColor: colors.finalFourPanelDark }}
           >
             {statuses.map((status, i) => (
-              <PubgLevel3HelmetIcon key={i} alive={status === 1} size={44} />
+              <span key={i} className="inline-flex shrink-0">
+                <PubgLevel3HelmetIcon alive={status === 1} size={44} />
+              </span>
             ))}
           </div>
         </div>

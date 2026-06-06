@@ -86,6 +86,16 @@ interface VisualConfig extends EliminationBannerVisual {
   eliminatedBgImage: string;
   winnerBgImage: string;
   leaderboardDesignMode: LeaderboardDesignMode;
+  finalFourDesignMode: FinalFourDesignMode;
+  finalFourCardBgImage: string;
+  finalFourTagGreen: string;
+  finalFourPanelDark: string;
+  finalFourPanelRow: string;
+  finalFourWwcdGreen: string;
+  finalFourBorder: string;
+  finalFourLogoBg: string;
+  finalFourTagText: string;
+  finalFourWwcdLabelText: string;
 }
 
 interface LayoutConfig {
@@ -113,6 +123,41 @@ interface EliminationBannerLayout {
 const STAGED_ELIM_PREVIEW_ALERT_ID = 'brohubs-elim-banner-staged-preview';
 
 /** Data contoh saat belum ada tim / eliminasi di klasemen */
+const STAGED_FINAL_FOUR_PREVIEW_DATA = [
+  {
+    rank: 1,
+    teamAbbreviation: 'ALPHA',
+    teamName: 'TEAM ALPHA',
+    teamLogo: '',
+    wwcdPotentialPct: 32.5,
+    playerStatus: [1, 1, 1, 0],
+  },
+  {
+    rank: 2,
+    teamAbbreviation: 'BRAVO',
+    teamName: 'TEAM BRAVO',
+    teamLogo: '',
+    wwcdPotentialPct: 28.0,
+    playerStatus: [1, 2, 0, 0],
+  },
+  {
+    rank: 3,
+    teamAbbreviation: 'CHARLIE',
+    teamName: 'TEAM CHARLIE',
+    teamLogo: '',
+    wwcdPotentialPct: 22.5,
+    playerStatus: [1, 1, 0, 0],
+  },
+  {
+    rank: 4,
+    teamAbbreviation: 'DELTA',
+    teamName: 'TEAM DELTA',
+    teamLogo: '',
+    wwcdPotentialPct: 17.0,
+    playerStatus: [0, 0, 0, 0],
+  },
+] as const;
+
 const STAGED_ELIM_PREVIEW_FALLBACK: TeamEliminationAlert = {
   id: STAGED_ELIM_PREVIEW_ALERT_ID,
   teamIndex: 0,
@@ -134,11 +179,7 @@ const DEFAULT_ELIMINATION_BANNER_LAYOUT: EliminationBannerLayout = {
 import {
   AnimationConfig,
   ANIMATION_PRESETS,
-  getAnimationSignature,
-  getRootMotionProps,
-  getChildMotionInitial,
-  getChildMotionExit,
-  getMotionEase,
+  getAnimationVariants,
   resolveAnimationConfig,
 } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
@@ -222,6 +263,17 @@ import {
   leaderboardPanelWidthForFlags,
   resolveLeaderboardPanelWidth,
 } from '@/lib/leaderboardVisual';
+import {
+  DEFAULT_FINAL_FOUR_LAYOUT,
+  DEFAULT_FINAL_FOUR_VISUAL,
+  FINAL_FOUR_COLOR_KEYS,
+  FINAL_FOUR_COLOR_LABELS,
+  FINAL_FOUR_DESIGN_MODE_LABELS,
+  type FinalFourDesignMode,
+  type FinalFourLayoutConfig,
+  isFinalFourPanelDesignMode,
+  resolveFinalFourSoloExitDelayMs,
+} from '@/lib/finalFourOverlayVisual';
 
 interface OverlayLeaderboardViewProps {
   asset: Asset;
@@ -242,8 +294,6 @@ interface OverlayLeaderboardViewProps {
   getAssetStatusProp?: (id: string) => number;
   onPreviewContentChange?: (content: React.ReactNode) => void;
   visualOnly?: boolean;
-  monitorFeed?: boolean;
-  feedPlayKey?: number;
   style?: React.CSSProperties;
 }
 
@@ -281,8 +331,6 @@ const FINAL_FOUR_MIN_ALIVE_COUNT = 1;
 const isEndgameTopOverlayCount = (count: number) =>
   count <= FINAL_FOUR_ALIVE_COUNT && count >= FINAL_FOUR_MIN_ALIVE_COUNT;
 /** Tahan kartu terakhir (1 tim) lalu transisi keluar */
-const FINAL_FOUR_SOLO_EXIT_DELAY_MS = 3200;
-const FINAL_FOUR_TOP_OFFSET_PX = 56;
 const FINAL_FOUR_PANEL_EXIT_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const FINAL_FOUR_ENTER_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const ScrollableInput = ({
@@ -668,17 +716,18 @@ const INITIAL_VISUAL_CONFIG: VisualConfig = {
   statusText: '#ffffff',
   ...DEFAULT_LEADERBOARD_BACKGROUND_IMAGES,
   leaderboardDesignMode: DEFAULT_LEADERBOARD_DESIGN_MODE,
+  ...DEFAULT_FINAL_FOUR_VISUAL,
   ...DEFAULT_ELIMINATION_BANNER_VISUAL,
 };
 
 const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({ 
   asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
-  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, monitorFeed = false, feedPlayKey, style
+  programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
 }) => {
   useOverlayFonts();
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
   const [visualSettingsPanel, setVisualSettingsPanel] = useState<
-    'choose' | 'leaderboard' | 'elimination'
+    'choose' | 'leaderboard' | 'elimination' | 'finalFour'
   >('choose');
   const [showList, setShowList] = useState(true);
   const [showMonitors, setShowMonitors] = useState(true);
@@ -747,6 +796,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const eliminationsInitializedRef = useRef(false);
   const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
+  const [finalFourHoldPreview, setFinalFourHoldPreview] = useState(false);
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
   const [isTieBreakerModalOpen, setIsTieBreakerModalOpen] = useState(false);
@@ -777,17 +827,14 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const [dbSearch, setDbSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const { replay, playKey } = React.useContext(PreviewControlContext);
+  const { replay } = React.useContext(PreviewControlContext);
 
   const handleSave = () => {
     setIsSaving(true);
     
     // Commit draft to shared state
-    setAnimationConfig({ ...draftAnimationConfig, mode: draftAnimationConfig.mode ?? 'custom' });
+    setAnimationConfig(draftAnimationConfig);
     
-    if (programAssetId === asset.id) {
-      setProgramPlayKey((k) => k + 1);
-    }
     // Briefly delay replay to allow state to propagate
     if (replay) {
       setTimeout(() => replay(), 100);
@@ -845,12 +892,29 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       );
       const needsLeaderboardModeMerge =
         (prev as VisualConfig).leaderboardDesignMode === undefined;
-      if (!needsElimMerge && !needsLeaderboardBgMerge && !needsLeaderboardModeMerge) {
+      const needsFinalFourMerge =
+        (prev as VisualConfig).finalFourDesignMode === undefined;
+      if (
+        !needsElimMerge &&
+        !needsLeaderboardBgMerge &&
+        !needsLeaderboardModeMerge &&
+        !needsFinalFourMerge
+      ) {
         return prev;
       }
       return { ...INITIAL_VISUAL_CONFIG, ...prev };
     });
   }, [setVisualConfig]);
+
+  const handleFinalFourCardImageUpload = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      setVisualConfig((prev) => ({ ...prev, finalFourCardBgImage: result }));
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleElimBannerImageUpload = (
     key: EliminationBannerImageKey,
@@ -936,6 +1000,29 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     'BROHUBS_ELIMINATION_BANNER_LAYOUT',
     DEFAULT_ELIMINATION_BANNER_LAYOUT
   );
+
+  const [finalFourLayout, setFinalFourLayout] = useSharedState<FinalFourLayoutConfig>(
+    'BROHUBS_FINAL_FOUR_LAYOUT',
+    DEFAULT_FINAL_FOUR_LAYOUT
+  );
+
+  useEffect(() => {
+    setFinalFourLayout((prev) => {
+      const needsMerge = (
+        Object.keys(DEFAULT_FINAL_FOUR_LAYOUT) as (keyof FinalFourLayoutConfig)[]
+      ).some((k) => prev[k] === undefined);
+      if (!needsMerge) return prev;
+      return { ...DEFAULT_FINAL_FOUR_LAYOUT, ...prev };
+    });
+  }, [setFinalFourLayout]);
+
+  const finalFourFontFamily = useMemo(
+    () =>
+      getOverlayFontCssFamily(
+        resolveOverlayFontFamilyId(finalFourLayout.fontFamilyId)
+      ),
+    [finalFourLayout.fontFamilyId]
+  );
   const elimBannerLayoutRef = useRef(elimBannerLayout);
   useEffect(() => {
     elimBannerLayoutRef.current = elimBannerLayout;
@@ -965,19 +1052,6 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     [animationConfig, presetOverrides]
   );
 
-  const activeAnimConfig = useMemo(
-    () =>
-      visualOnly || monitorFeed
-        ? effectiveAnimationConfig
-        : resolveAnimationConfig(draftAnimationConfig, presetOverrides, ANIMATION_PRESETS),
-    [visualOnly, monitorFeed, effectiveAnimationConfig, draftAnimationConfig, presetOverrides]
-  );
-
-  const rootMotionProps = useMemo(
-    () => getRootMotionProps(activeAnimConfig),
-    [activeAnimConfig]
-  );
-
   // Push transition settings to OBS / output links (separate browser storage)
   useEffect(() => {
     if (visualOnly) return;
@@ -990,11 +1064,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   const [showOverlay, setShowOverlay] = useState(true);
   const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
-  const [programPlayKey, setProgramPlayKey] = useState(0);
   
   const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
   const setProgramAssetId = (id: string | null) => {
-    if (id) setProgramPlayKey((k) => k + 1);
     if (onProgramAssetChange) onProgramAssetChange(id);
     else setInternalProgramAssetId(id);
   };
@@ -1105,10 +1177,15 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   /** Fase endgame (≤4 tim): sembunyikan klasemen kanan & banner elim */
   const isEndgamePhase = isEndgameTopOverlayCount(survivingMatchCount);
-  /** Bar WWCD atas — saat 1 tim: tahan 3,2s lalu transisi keluar */
-  const showFinalFourTopBar = isEndgamePhase && finalFourTopBarVisible;
+  /** Bar WWCD atas — saat 1 tim: tahan lalu transisi keluar */
+  const showFinalFourTopBar =
+    finalFourHoldPreview || (isEndgamePhase && finalFourTopBarVisible);
+
+  const soloExitDelayMs = resolveFinalFourSoloExitDelayMs(finalFourLayout.soloExitDelayMs);
 
   useEffect(() => {
+    if (finalFourHoldPreview) return;
+
     if (finalFourSoloExitTimerRef.current) {
       clearTimeout(finalFourSoloExitTimerRef.current);
       finalFourSoloExitTimerRef.current = null;
@@ -1124,12 +1201,12 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       finalFourSoloExitTimerRef.current = setTimeout(() => {
         setFinalFourTopBarVisible(false);
         finalFourSoloExitTimerRef.current = null;
-      }, FINAL_FOUR_SOLO_EXIT_DELAY_MS);
+      }, soloExitDelayMs);
       return;
     }
 
     setFinalFourTopBarVisible(true);
-  }, [isEndgamePhase, survivingMatchCount]);
+  }, [isEndgamePhase, survivingMatchCount, soloExitDelayMs, finalFourHoldPreview]);
   /** Bisa lanjut match berikutnya jika tersisa ≤2 tim tanpa placement (WWCD / top 2) */
   const isMatchReadyToEnd = contentionCount <= 2;
   const matchWinnerCandidate = useMemo(() => {
@@ -1901,7 +1978,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
   // Push team / layout / visual ke OBS (normal — tidak saat Preview Sementara)
   useEffect(() => {
-    if (visualOnly || elimBannerHoldPreview) return;
+    if (visualOnly || elimBannerHoldPreview || finalFourHoldPreview) return;
     const timer = setTimeout(() => {
       notifyCompanionData({
         assetId: asset.id,
@@ -1914,6 +1991,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           BROHUBS_LEADERBOARD_VISUAL: visualConfig,
           BROHUBS_LEADERBOARD_LAYOUT: layoutConfig,
           BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
+          BROHUBS_FINAL_FOUR_LAYOUT: finalFourLayout,
           BROHUBS_LEADERBOARD_MATCH_KILL_RULES: matchKillRulesByMatch,
           BROHUBS_TOPFRAGGERS_DATA: fraggers,
         },
@@ -1928,12 +2006,28 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     visualConfig,
     layoutConfig,
     elimBannerLayout,
+    finalFourLayout,
     matchKillRulesByMatch,
     fraggers,
     visualOnly,
     elimBannerHoldPreview,
+    finalFourHoldPreview,
     projectPlayers,
   ]);
+
+  useEffect(() => {
+    if (visualOnly || !finalFourHoldPreview) return;
+    const timer = setTimeout(() => {
+      notifyCompanionData({
+        assetId: asset.id,
+        data: {
+          BROHUBS_LEADERBOARD_VISUAL: visualConfig,
+          BROHUBS_FINAL_FOUR_LAYOUT: finalFourLayout,
+        },
+      });
+    }, 380);
+    return () => clearTimeout(timer);
+  }, [asset.id, visualOnly, finalFourHoldPreview, visualConfig, finalFourLayout]);
 
   // Preview Sementara: sync layout/visual setelah scroll berhenti (tidak saat wheel aktif)
   useEffect(() => {
@@ -2260,6 +2354,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       })
       .sort((a, b) => (a.wwcdPosition ?? 99) - (b.wwcdPosition ?? 99));
   }, [isEndgamePhase, survivingMatchTeams, sortedPreviewTeams, projectPlayers]);
+
+  const getAssetAnimationVariants = useCallback(() => {
+    return getAnimationVariants(effectiveAnimationConfig);
+  }, [effectiveAnimationConfig]);
 
   const rowVariants = useMemo(() => ({
     initial: { x: 20, opacity: 0 },
@@ -2720,8 +2818,28 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     contentionCount,
   ]);
 
+  const effectiveFinalFourTeamsData = finalFourHoldPreview
+    ? [...STAGED_FINAL_FOUR_PREVIEW_DATA]
+    : finalFourTeamsData;
+
+  const finalFourCardLayout = useMemo(
+    () => ({
+      tagFontSize: finalFourLayout.tagFontSize ?? DEFAULT_FINAL_FOUR_LAYOUT.tagFontSize,
+      wwcdLabelFontSize:
+        finalFourLayout.wwcdLabelFontSize ?? DEFAULT_FINAL_FOUR_LAYOUT.wwcdLabelFontSize,
+      wwcdPctFontSize:
+        finalFourLayout.wwcdPctFontSize ?? DEFAULT_FINAL_FOUR_LAYOUT.wwcdPctFontSize,
+      fontFamily: finalFourFontFamily,
+    }),
+    [finalFourLayout, finalFourFontFamily]
+  );
+
   const finalFourOverlayPanel = useMemo(() => {
-    if (!showOverlay || !isEndgamePhase || finalFourTeamsData.length === 0) {
+    if (
+      !showOverlay ||
+      (!isEndgamePhase && !finalFourHoldPreview) ||
+      effectiveFinalFourTeamsData.length === 0
+    ) {
       return null;
     }
 
@@ -2729,16 +2847,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       <div
         className="absolute left-0 right-0 flex justify-center pointer-events-none z-[400] px-10"
         style={{
-          top: `${FINAL_FOUR_TOP_OFFSET_PX}px`,
-          fontFamily: leaderboardFontFamily,
+          top: `${finalFourLayout.yOffset ?? DEFAULT_FINAL_FOUR_LAYOUT.yOffset}px`,
+          fontFamily: finalFourFontFamily,
         }}
       >
         <div
-          className="flex flex-row items-stretch justify-center gap-5 w-full max-w-[1680px]"
-          style={{ scale: layoutConfig.scale / 100, transformOrigin: 'top center' }}
+          className="flex flex-row items-stretch justify-center w-full max-w-[1680px]"
+          style={{
+            gap: `${finalFourLayout.cardGap ?? DEFAULT_FINAL_FOUR_LAYOUT.cardGap}px`,
+            scale: (finalFourLayout.scale ?? DEFAULT_FINAL_FOUR_LAYOUT.scale) / 100,
+            transform: `translateX(${finalFourLayout.xOffset ?? DEFAULT_FINAL_FOUR_LAYOUT.xOffset}px)`,
+            transformOrigin: 'top center',
+          }}
         >
           <AnimatePresence mode="popLayout">
-            {finalFourTeamsData.map((entry, idx) => (
+            {effectiveFinalFourTeamsData.map((entry, idx) => (
               <motion.div
                 key={entry.rank}
                 layout
@@ -2762,7 +2885,11 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                 }}
                 className="shrink-0"
               >
-                <FinalFourTeamCard entry={entry} />
+                <FinalFourTeamCard
+                  entry={entry}
+                  visual={visualConfig}
+                  layout={finalFourCardLayout}
+                />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -2772,10 +2899,12 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   }, [
     showOverlay,
     isEndgamePhase,
-    finalFourTeamsData,
-    layoutConfig,
+    finalFourHoldPreview,
+    effectiveFinalFourTeamsData,
+    finalFourLayout,
     visualConfig,
-    leaderboardFontFamily,
+    finalFourFontFamily,
+    finalFourCardLayout,
   ]);
 
   const elimBannerPreviewNode = useMemo(
@@ -2799,19 +2928,14 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
     ]
   );
 
-  const renderLivePreview = useCallback((overrideAnimKey?: number) => {
-    const resolvedAnimKey = overrideAnimKey ?? feedPlayKey ?? playKey;
-    return (
+  const livePreviewContent = useMemo(
+    () => (
       <motion.div
-        key={`leaderboard-asset-${resolvedAnimKey}-${getAnimationSignature(activeAnimConfig)}`}
-        initial={rootMotionProps.initial}
-        animate={rootMotionProps.animate}
-        exit={rootMotionProps.exit}
-        transition={rootMotionProps.transition}
+        {...getAssetAnimationVariants()}
         style={style}
         className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden font-sans select-none ${style?.position === 'absolute' ? '' : 'mx-auto'}`}
       >
-        {!visualOnly && !monitorFeed && (
+        {!visualOnly && (
           <div
             className="absolute inset-0 opacity-40"
             style={{
@@ -2824,53 +2948,41 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
 
         {showEliminationBanner && elimBannerPreviewNode}
 
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {showOverlay && !isEndgamePhase && leaderboardOverlayPanel && (
             <motion.div
               key="overall-ranking-panel"
               className="absolute inset-0 pointer-events-none z-[350]"
-              initial={getChildMotionInitial(activeAnimConfig, 120)}
-              animate={{ x: 0, y: 0, opacity: 1 }}
+              initial={{ x: 64, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
               exit={{
-                ...getChildMotionExit(activeAnimConfig, 120),
-                transition: {
-                  duration: activeAnimConfig.duration * 0.8,
-                  ease: getMotionEase(activeAnimConfig),
-                },
+                x: 520,
+                opacity: 0,
+                scale: 0.94,
+                transition: { duration: 0.65, ease: FINAL_FOUR_PANEL_EXIT_EASE },
               }}
-              transition={{
-                duration: activeAnimConfig.duration,
-                delay: activeAnimConfig.delay,
-                ease: getMotionEase(activeAnimConfig),
-              }}
+              transition={{ duration: 0.5, ease: FINAL_FOUR_ENTER_EASE }}
             >
               {leaderboardOverlayPanel}
             </motion.div>
           )}
         </AnimatePresence>
 
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {showOverlay && showFinalFourTopBar && (
             <motion.div
               key="final-four-bar"
               className="absolute inset-0 pointer-events-none z-[400]"
-              initial={getChildMotionInitial(activeAnimConfig, 120)}
+              initial={{ y: -120, opacity: 0 }}
               animate={{
-                x: 0,
                 y: 0,
                 opacity: 1,
-                transition: {
-                  duration: activeAnimConfig.duration,
-                  delay: activeAnimConfig.delay + 0.08,
-                  ease: getMotionEase(activeAnimConfig),
-                },
+                transition: { duration: 0.6, ease: FINAL_FOUR_ENTER_EASE, delay: 0.08 },
               }}
               exit={{
-                ...getChildMotionExit(activeAnimConfig, 120),
-                transition: {
-                  duration: activeAnimConfig.duration * 0.75,
-                  ease: getMotionEase(activeAnimConfig),
-                },
+                y: -80,
+                opacity: 0,
+                transition: { duration: 0.45, ease: FINAL_FOUR_PANEL_EXIT_EASE },
               }}
             >
               {finalFourOverlayPanel}
@@ -2878,28 +2990,19 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           )}
         </AnimatePresence>
       </motion.div>
-    );
-  }, [
-    activeAnimConfig,
-    rootMotionProps,
-    style,
-    visualOnly,
-    monitorFeed,
-    elimBannerPreviewNode,
-    leaderboardOverlayPanel,
-    finalFourOverlayPanel,
-    showOverlay,
-    isEndgamePhase,
-    showFinalFourTopBar,
-    showEliminationBanner,
-    feedPlayKey,
-    playKey,
-  ]);
-
-  const livePreviewContent = useMemo(() => renderLivePreview(), [renderLivePreview]);
-  const programFeedContent = useMemo(
-    () => renderLivePreview(programPlayKey),
-    [renderLivePreview, programPlayKey]
+    ),
+    [
+      getAssetAnimationVariants,
+      style,
+      visualOnly,
+      elimBannerPreviewNode,
+      leaderboardOverlayPanel,
+      finalFourOverlayPanel,
+      showOverlay,
+      isEndgamePhase,
+      showFinalFourTopBar,
+      showEliminationBanner,
+    ]
   );
 
   // Sync preview content to parent
@@ -2910,7 +3013,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   }, [livePreviewContent, onPreviewContentChange, visualOnly]);
 
   if (visualOnly) {
-    return renderLivePreview(feedPlayKey);
+    return livePreviewContent;
   }
 
   return (
@@ -3316,10 +3419,10 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   Pilih pengaturan visual
                                 </h3>
                                 <p className="text-[8px] text-zinc-500 normal-case mt-1.5 max-w-md mx-auto leading-relaxed">
-                                  Overall Ranking dan Elimination Banner dipisah agar lebih mudah diatur.
+                                  Overall Ranking, Final Four WWCD, dan Elimination Banner dipisah agar lebih mudah diatur.
                                 </p>
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 <button
                                   type="button"
                                   onClick={() => setVisualSettingsPanel('leaderboard')}
@@ -3348,6 +3451,21 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                                   </h4>
                                   <p className="text-[8px] text-zinc-500 normal-case leading-relaxed">
                                     Panel / Custom Image, preview, posisi banner, font, warna, dan overlay # / TAG.
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisualSettingsPanel('finalFour')}
+                                  className="group p-6 bg-zinc-900 border border-white/10 rounded-[20px] text-left hover:border-green-500/40 hover:bg-zinc-900/80 transition-all shadow-sm sm:col-span-2 lg:col-span-1"
+                                >
+                                  <div className="w-11 h-11 rounded-xl bg-green-500/15 border border-green-500/30 flex items-center justify-center mb-4 group-hover:bg-green-500/25 transition-colors">
+                                    <Trophy size={22} className="text-green-400" />
+                                  </div>
+                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest mb-1">
+                                    Final Four WWCD
+                                  </h4>
+                                  <p className="text-[8px] text-zinc-500 normal-case leading-relaxed">
+                                    Bar 4 tim endgame — Panel / Custom Image, posisi, warna, font, dan delay keluar saat 1 tim.
                                   </p>
                                 </button>
                               </div>
@@ -4335,6 +4453,269 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
                            </div>
                         </div>
                           )}
+
+                          {visualSettingsPanel === 'finalFour' && (
+                        <div className="space-y-6">
+                           <div className="p-6 bg-zinc-900 border border-white/5 rounded-[20px] shadow-sm">
+                                <div className="flex justify-between items-center mb-4">
+                                   <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                     <Trophy size={12} className="text-green-500" />
+                                     FINAL FOUR WWCD BAR
+                                   </h3>
+                                   <div className="flex flex-col items-end gap-2">
+                                   <div className="flex items-center gap-2">
+                                     <button
+                                       type="button"
+                                       onClick={() => setFinalFourHoldPreview(true)}
+                                       disabled={finalFourHoldPreview}
+                                       className={`text-[7px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors ${
+                                         finalFourHoldPreview
+                                           ? 'text-zinc-700 cursor-not-allowed'
+                                           : 'text-zinc-500 hover:text-[#ccff00]'
+                                       }`}
+                                     >
+                                       <Play size={10} /> PREVIEW
+                                     </button>
+                                     <button
+                                       type="button"
+                                       onClick={() => {
+                                         setFinalFourHoldPreview(false);
+                                         setFinalFourLayout(DEFAULT_FINAL_FOUR_LAYOUT);
+                                         setVisualConfig((prev) => ({
+                                           ...prev,
+                                           ...DEFAULT_FINAL_FOUR_VISUAL,
+                                         }));
+                                       }}
+                                       className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                     >
+                                       <RotateCcw size={10} /> RESET
+                                     </button>
+                                   </div>
+                                   <label
+                                     className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                                       finalFourHoldPreview
+                                         ? 'bg-[#ccff00]/15 border-[#ccff00]/50 text-[#ccff00]'
+                                         : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'
+                                     }`}
+                                   >
+                                     <input
+                                       type="checkbox"
+                                       checked={finalFourHoldPreview}
+                                       onChange={(e) => setFinalFourHoldPreview(e.target.checked)}
+                                       className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
+                                     />
+                                     <Eye size={10} />
+                                     <span className="text-[7px] font-black uppercase tracking-widest">
+                                       Preview Sementara
+                                     </span>
+                                   </label>
+                                   </div>
+                                </div>
+                                <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
+                                  Bar WWCD muncul saat ≤4 tim tersisa · geser posisi di canvas 1920×1080.
+                                  {finalFourHoldPreview ? (
+                                    <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
+                                      Preview aktif — 4 kartu contoh tampil di Monitor Preview / Program &amp; Link Output.
+                                    </span>
+                                  ) : null}
+                                </p>
+                                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SCALE (%)</label><ScrollableInput value={finalFourLayout.scale} onChange={(val) => setFinalFourLayout({...finalFourLayout, scale: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS X</label><ScrollableInput value={finalFourLayout.xOffset} onChange={(val) => setFinalFourLayout({...finalFourLayout, xOffset: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">POS Y</label><ScrollableInput value={finalFourLayout.yOffset} onChange={(val) => setFinalFourLayout({...finalFourLayout, yOffset: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">CARD GAP</label><ScrollableInput value={finalFourLayout.cardGap} onChange={(val) => setFinalFourLayout({...finalFourLayout, cardGap: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SOLO EXIT (ms)</label><ScrollableInput value={finalFourLayout.soloExitDelayMs} onChange={(val) => setFinalFourLayout({...finalFourLayout, soloExitDelayMs: resolveFinalFourSoloExitDelayMs(val)})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2 flex items-center gap-2">
+                                    <Type size={12} className="text-[#ccff00]" />
+                                    Jenis font (Final Four)
+                                  </h4>
+                                  <OverlayFontFamilySelect
+                                    value={finalFourLayout.fontFamilyId}
+                                    onChange={(fontFamilyId) =>
+                                      setFinalFourLayout((prev) => ({ ...prev, fontFamilyId }))
+                                    }
+                                  />
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-2">
+                                    Ukuran font (px)
+                                  </h4>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">TAG</label><ScrollableInput value={finalFourLayout.tagFontSize} onChange={(val) => setFinalFourLayout({...finalFourLayout, tagFontSize: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">WWCD LABEL</label><ScrollableInput value={finalFourLayout.wwcdLabelFontSize} onChange={(val) => setFinalFourLayout({...finalFourLayout, wwcdLabelFontSize: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                    <div><label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">WWCD %</label><ScrollableInput value={finalFourLayout.wwcdPctFontSize} onChange={(val) => setFinalFourLayout({...finalFourLayout, wwcdPctFontSize: val})} className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center" /></div>
+                                  </div>
+                                </div>
+                           </div>
+
+                           <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2">
+                                  <Link2 size={12} className="text-[#ccff00]" />
+                                  Desain kartu Final Four
+                                </h4>
+                                <p className="text-[7px] text-zinc-500 normal-case mb-3 tracking-wide">
+                                  Panel = warna solid · Custom Image = background kartu via link (388×128 px)
+                                </p>
+                                <div className="flex gap-2">
+                                  {(['panels', 'customImage'] as const satisfies readonly FinalFourDesignMode[]).map(
+                                    (mode) => (
+                                      <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() =>
+                                          setVisualConfig((prev) => ({
+                                            ...prev,
+                                            finalFourDesignMode: mode,
+                                          }))
+                                        }
+                                        className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all ${
+                                          (visualConfig.finalFourDesignMode ?? 'panels') === mode
+                                            ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                            : 'bg-black text-zinc-500 border-white/10 hover:border-white/20'
+                                        }`}
+                                      >
+                                        {FINAL_FOUR_DESIGN_MODE_LABELS[mode]}
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                           </div>
+
+                           {isFinalFourPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <Palette size={12} className="text-[#ccff00]" />
+                                  WARNA PANEL
+                                </h4>
+                                <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
+                                    {FINAL_FOUR_COLOR_KEYS.map((key) => (
+                                        <div key={key} className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24">
+                                            <div className="flex justify-between items-start relative z-30">
+                                                <label className="text-[7px] font-black uppercase tracking-widest pointer-events-none text-zinc-500">{FINAL_FOUR_COLOR_LABELS[key]}</label>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        setVisualConfig((prev) => ({
+                                                          ...prev,
+                                                          [key]: (INITIAL_VISUAL_CONFIG as VisualConfig)[key],
+                                                        }));
+                                                    }}
+                                                    className="p-1 -mt-1 -mr-1 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                                    title="Reset to Default"
+                                                >
+                                                    <RotateCcw size={10} />
+                                                </button>
+                                            </div>
+                                            <span className="text-[9px] font-[1000] text-white uppercase tracking-wider truncate relative z-10 pointer-events-none">{(visualConfig as VisualConfig)[key]}</span>
+                                            <input
+                                                type="color"
+                                                value={(visualConfig as VisualConfig)[key]}
+                                                onChange={(e) => setVisualConfig({...visualConfig, [key]: e.target.value})}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                            />
+                                            <div className="absolute inset-0 opacity-20 transition-opacity group-hover:opacity-30 pointer-events-none" style={{ backgroundColor: (visualConfig as VisualConfig)[key] }} />
+                                            <div className="absolute bottom-3 right-3 w-6 h-6 rounded-full shadow-sm border border-white/20 pointer-events-none" style={{ backgroundColor: (visualConfig as VisualConfig)[key] }} />
+                                        </div>
+                                    ))}
+                                </div>
+                           </div>
+                           )}
+
+                           {!isFinalFourPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-black/40 border border-[#ccff00]/20 rounded-xl space-y-4">
+                                <h4 className="text-[9px] font-black text-[#ccff00] uppercase tracking-widest flex items-center gap-2">
+                                  <Image size={12} />
+                                  Custom Image (LINK)
+                                </h4>
+                                <p className="text-[7px] text-zinc-500 normal-case leading-relaxed">
+                                  Satu gambar per kartu (388×128) · area transparan memakai warna fallback Panel Dark.
+                                </p>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="url"
+                                    placeholder="https://... atau /path/card-bg.png"
+                                    value={visualConfig.finalFourCardBgImage}
+                                    onChange={(e) =>
+                                      setVisualConfig((prev) => ({
+                                        ...prev,
+                                        finalFourCardBgImage: e.target.value,
+                                      }))
+                                    }
+                                    className="flex-1 min-w-0 bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white outline-none focus:border-[#ccff00]"
+                                  />
+                                  <label className="shrink-0 px-2 py-2 bg-zinc-800 border border-white/10 rounded-lg text-[7px] font-black text-zinc-400 uppercase tracking-widest cursor-pointer hover:border-[#ccff00]/50 hover:text-[#ccff00] transition-colors">
+                                    <Upload size={10} className="inline mr-1" />
+                                    File
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        handleFinalFourCardImageUpload(e.target.files?.[0]);
+                                        e.target.value = '';
+                                      }}
+                                    />
+                                  </label>
+                                  {visualConfig.finalFourCardBgImage && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setVisualConfig((prev) => ({
+                                          ...prev,
+                                          finalFourCardBgImage: '',
+                                        }))
+                                      }
+                                      className="shrink-0 px-2 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+                                      title="Hapus gambar"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setVisualConfig((prev) => ({
+                                      ...prev,
+                                      finalFourCardBgImage: '',
+                                    }))
+                                  }
+                                  className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
+                                >
+                                  <RotateCcw size={10} /> Reset background gambar
+                                </button>
+                           </div>
+                           )}
+
+                           {!isFinalFourPanelDesignMode(visualConfig) && (
+                           <div className="p-4 bg-zinc-950 border border-white/5 rounded-xl">
+                                <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <Palette size={12} className="text-zinc-400" />
+                                  Warna teks
+                                </h4>
+                                <div className="grid grid-cols-4 gap-3">
+                                  {(['finalFourTagText', 'finalFourWwcdLabelText', 'finalFourWwcdGreen', 'finalFourLogoBg'] as const).map((key) => (
+                                    <div key={key} className="bg-black border border-white/10 rounded-xl p-3 flex flex-col justify-between gap-2 relative group hover:border-white/30 transition-all h-24">
+                                      <label className="text-[7px] font-black uppercase tracking-widest text-zinc-500 relative z-30">{FINAL_FOUR_COLOR_LABELS[key]}</label>
+                                      <span className="text-[9px] font-[1000] text-white uppercase tracking-wider truncate relative z-10 pointer-events-none">{(visualConfig as VisualConfig)[key]}</span>
+                                      <input
+                                        type="color"
+                                        value={(visualConfig as VisualConfig)[key]}
+                                        onChange={(e) => setVisualConfig({...visualConfig, [key]: e.target.value})}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                      />
+                                      <div className="absolute inset-0 opacity-20 group-hover:opacity-30 pointer-events-none" style={{ backgroundColor: (visualConfig as VisualConfig)[key] }} />
+                                    </div>
+                                  ))}
+                                </div>
+                           </div>
+                           )}
+                        </div>
+                          )}
                         </div>
                     )}
 
@@ -4651,10 +5032,9 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
           <div className={`transition-all duration-300 flex shrink-0 ${showMonitors ? 'opacity-100' : 'w-0 opacity-0 pointer-events-none'}`}>
             <PanelControlMonitor 
               userRole={userRole} 
-              customPreview={livePreviewContent}
-              programPlayKey={programPlayKey}
+              customPreview={livePreviewContent} 
               programPreview={
-                programAssetId === asset.id ? programFeedContent : (
+                programAssetId === asset.id ? livePreviewContent : (
                   programAssetId ? (
                     <div className="w-full h-full flex flex-col items-center justify-center bg-black text-white">
                       <h2 className="text-4xl font-black text-[#ccff00] mb-4">ASSET PLAYING</h2>
