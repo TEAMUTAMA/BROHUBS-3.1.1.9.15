@@ -696,14 +696,25 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     [activeTeam]
   );
 
+  /** Header timing only — arah slide kiri/kanan tetap, tidak ikut inType/outType global */
+  const rosterHeaderAnimTiming = useMemo(
+    () =>
+      ({
+        delay: effectiveAnimationConfig.delay,
+        duration: effectiveAnimationConfig.duration,
+        easing: effectiveAnimationConfig.easing,
+      }) as AnimationConfig,
+    [effectiveAnimationConfig.delay, effectiveAnimationConfig.duration, effectiveAnimationConfig.easing]
+  );
+
   const rosterHeaderTitleVariants = useMemo(
-    () => buildRosterHeaderTitleVariants(effectiveAnimationConfig),
-    [effectiveAnimationConfig]
+    () => buildRosterHeaderTitleVariants(rosterHeaderAnimTiming),
+    [rosterHeaderAnimTiming]
   );
 
   const rosterHeaderSubtitleVariants = useMemo(
-    () => buildRosterHeaderSubtitleVariants(effectiveAnimationConfig),
-    [effectiveAnimationConfig]
+    () => buildRosterHeaderSubtitleVariants(rosterHeaderAnimTiming),
+    [rosterHeaderAnimTiming]
   );
 
   const rosterTeamVariants = useMemo(
@@ -1031,12 +1042,8 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     const rosterLayout = cardLayout as RosterLayout;
 
     return (
-      <motion.div
+      <div
         key={`roster-asset-${resolvedAnimKey}-${getAnimationSignature(activeAnimConfig)}`}
-        initial={rootMotionProps.initial}
-        animate={rootMotionProps.animate}
-        exit={rootMotionProps.exit}
-        transition={rootMotionProps.transition}
         style={style}
         className={`w-[1920px] h-[1080px] bg-transparent relative overflow-hidden ${
           style?.position === 'absolute' ? '' : 'mx-auto'
@@ -1142,6 +1149,13 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
             </motion.div>
           </div>
 
+          <motion.div
+            className="flex flex-col items-center flex-1 w-full min-h-0"
+            initial={rootMotionProps.initial}
+            animate={rootMotionProps.animate}
+            exit={rootMotionProps.exit}
+            transition={rootMotionProps.transition}
+          >
           <AnimatePresence mode="wait">
           {team ? (
             <motion.div
@@ -1323,9 +1337,10 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
             </div>
           )}
           </AnimatePresence>
+          </motion.div>
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }, [
     feedPlayKey,
