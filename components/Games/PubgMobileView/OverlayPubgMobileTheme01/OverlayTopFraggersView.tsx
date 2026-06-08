@@ -52,6 +52,7 @@ interface OverlayTopFraggersViewProps {
   onSelectAsset?: (asset: Asset) => void;
   globalLogo?: string | null;
   projectPlayers?: PlayerData[]; // Database from Project
+  companionProjectScope?: string | null;
   isGlobalStudio?: boolean;
   showMonitorProp?: boolean;
   programAssetIdProp?: string | null;
@@ -107,8 +108,15 @@ const ScrollableInput = ({
 const DEFAULT_PLAYER_IMG = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop';
 const DEFAULT_TEAM_LOGO = 'https://api.dicebear.com/7.x/identicon/svg?seed=DEFAULT';
 
+function resolveMediaSrc(src?: string | null, fallback?: string): string | undefined {
+  const trimmed = src?.trim();
+  if (trimmed) return trimmed;
+  const fb = fallback?.trim();
+  return fb || undefined;
+}
+
 const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({ 
-  asset, theme, games, themes, availableAssets, userRole, onBack, onSelectTheme, onSelectAsset, globalLogo, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
+  asset, theme, games, themes, availableAssets, userRole, onBack, onSelectTheme, onSelectAsset, globalLogo, projectPlayers = [], companionProjectScope = null, isGlobalStudio = false, showMonitorProp = true,
   programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, monitorFeed = false, feedPlayKey, style
 }) => {
   useOverlayFonts();
@@ -447,8 +455,8 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
     notifyCompanionAnimation({
       assetId: asset.id,
       animation: animationConfig,
-    });
-  }, [asset.id, animationConfig, visualOnly]);
+    }, companionProjectScope);
+  }, [asset.id, animationConfig, visualOnly, companionProjectScope]);
 
   useEffect(() => {
     if (visualOnly) return;
@@ -462,10 +470,10 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
           BROHUBS_TOPFRAGGERS_LAYOUT: cardLayout,
           BROHUBS_TOPFRAGGERS_MATCH: matchInfo,
         },
-      });
+      }, companionProjectScope);
     }, 400);
     return () => clearTimeout(timer);
-  }, [asset.id, fraggers, visualConfig, typography, cardLayout, matchInfo, visualOnly]);
+  }, [asset.id, fraggers, visualConfig, typography, cardLayout, matchInfo, visualOnly, companionProjectScope]);
 
   const activeAnimConfig = useMemo(
     () => (visualOnly || monitorFeed ? animationConfig : draftAnimationConfig),
@@ -488,7 +496,11 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
   );
 
   const displayFraggers = useMemo(() => {
-    let list = [...fraggers];
+    let list = fraggers.map((f) => ({
+      ...f,
+      teamLogo: resolveMediaSrc(f.teamLogo, DEFAULT_TEAM_LOGO)!,
+      image: resolveMediaSrc(f.image, DEFAULT_PLAYER_IMG)!,
+    }));
     if (selectedTeamFilter !== 'ALL') {
        list = list.filter(f => f.team.toLowerCase() === selectedTeamFilter.toLowerCase());
        list.sort((a, b) => b.elims - a.elims);
@@ -518,9 +530,9 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
          }} />
        )}
        
-       {globalLogo && (
+       {globalLogo?.trim() && (
          <div className="absolute top-10 left-10 z-40">
-           <img src={globalLogo} alt="Global Logo" className="h-20 w-auto object-contain" />
+           <img src={globalLogo.trim()} alt="Global Logo" className="h-20 w-auto object-contain" />
          </div>
        )}
 
@@ -593,9 +605,9 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                        {/* Top Right Icon/Badge from Reference */}
                        <div className="absolute top-4 right-4 z-30">
                            <div className="w-10 h-10 rounded-xl bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center border-2 border-white/20 shadow-lg">
-                               {player.teamLogo ? (
+                               {resolveMediaSrc(player.teamLogo) ? (
                                     <img 
-                                        src={player.teamLogo} 
+                                        src={resolveMediaSrc(player.teamLogo)!} 
                                         className="w-full h-full p-1 object-contain" 
                                         alt="Team Logo"
                                         referrerPolicy="no-referrer"
@@ -611,9 +623,9 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
 
                        {/* Player Frame (Dark Box) */}
                        <div className="w-full aspect-[4/3] bg-black/20 rounded-sm mb-8 flex items-end justify-center overflow-hidden relative shadow-inner">
-                           {player.teamLogo && (
+                           {resolveMediaSrc(player.teamLogo) && (
                              <img 
-                               src={player.teamLogo} 
+                               src={resolveMediaSrc(player.teamLogo)!} 
                                className="absolute object-contain z-0 top-1/2 left-1/2 select-none pointer-events-none" 
                                 style={{
                                     width: `${cardLayout.bgLogoScale ?? 66}%`, 
@@ -626,7 +638,18 @@ const OverlayTopFraggersView: React.FC<OverlayTopFraggersViewProps> = ({
                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
                              />
                            )}
-                          <img src={player.image} className="w-auto h-full object-contain" style={{ transform: `scale(${cardLayout.playerScale / 100}) translate(${cardLayout.playerX}px, ${cardLayout.playerY}px)`, transformOrigin: 'bottom center' }} />
+                          {resolveMediaSrc(player.image) ? (
+                            <img
+                              src={resolveMediaSrc(player.image)!}
+                              className="w-auto h-full object-contain"
+                              style={{ transform: `scale(${cardLayout.playerScale / 100}) translate(${cardLayout.playerX}px, ${cardLayout.playerY}px)`, transformOrigin: 'bottom center' }}
+                              alt={player.name}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                              <User size={48} className="opacity-40" />
+                            </div>
+                          )}
                        </div>
 
                        <div className="w-full text-center z-20 space-y-6">

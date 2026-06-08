@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Game, Theme, PlayerData } from '../types';
 import { loadProjectPlayers } from '../lib/projectPlayers';
+import { hydrateProjectCacheForScope } from '../services/projectService';
 import { ASSET_DATABASE } from '../constants/assets';
 import { getGames, getThemes } from '../services/gameService';
 import { useSharedState } from '../lib/useSharedState';
-import { resolveAssetIdFromLocation, resolveProjectScopeFromLocation } from '../lib/outputRoute';
+import {
+  resolveAssetIdFromLocation,
+  resolveProjectScopeFromLocation,
+  resolveProjectScopeFromLocationAsync,
+} from '../lib/outputRoute';
 import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey } from '../lib/programLayers';
 import { useCompanionOutputSync } from '../lib/useCompanionOutputSync';
 import OverlayTopFraggersView from './Games/PubgMobileView/OverlayPubgMobileTheme01/OverlayTopFraggersView';
@@ -30,8 +35,8 @@ const StandaloneProgramView: React.FC = () => {
     DEFAULT_PROGRAM_LAYERS
   );
 
-  // OBS / browser source: follow PGM triggers via SSE (not localStorage from dashboard tab)
-  useCompanionOutputSync(setProgramLayers, true);
+  // OBS / browser source: follow PGM triggers via SSE (scoped to this project output link)
+  useCompanionOutputSync(setProgramLayers, true, projectScope);
 
   // Local helper UI states for alignment
   const [showGrid, setShowGrid] = useState(false);
@@ -68,8 +73,32 @@ const StandaloneProgramView: React.FC = () => {
   }, [programLayers]);
 
   useEffect(() => {
-    setProjectPlayers(loadProjectPlayers(projectScope));
+    let cancelled = false;
+
+    const syncPlayers = async () => {
+      await hydrateProjectCacheForScope(projectScope);
+      if (!cancelled) {
+        setProjectPlayers(loadProjectPlayers(projectScope));
+      }
+    };
+
+    syncPlayers();
+    return () => {
+      cancelled = true;
+    };
   }, [projectScope]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    resolveProjectScopeFromLocationAsync().then((scope) => {
+      if (!cancelled) setProjectScope(scope);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load games, themes, and global logo on mount
   useEffect(() => {

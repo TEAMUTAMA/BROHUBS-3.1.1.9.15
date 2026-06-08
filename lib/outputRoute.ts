@@ -1,4 +1,5 @@
 import { ASSET_DATABASE } from '../constants/assets';
+import { findProjectIdByNameSlug } from '../services/projectService';
 import type { Asset, Project } from '../types';
 
 export const slugify = (text: string) =>
@@ -54,6 +55,37 @@ export function resolveProjectScopeFromLocation(
 
   const route = parseOutputPath(pathname);
   if (!route || route.projectSlug === 'default') return 'GLOBAL';
+
+  try {
+    const projectKeys = Object.keys(localStorage).filter((k) => k.startsWith('BROHUBS_PROJECTS_'));
+    for (const key of projectKeys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const projects = JSON.parse(raw) as Project[];
+      const match = projects.find((p) => slugify(p.name) === route.projectSlug.toLowerCase());
+      if (match) return match.id;
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return 'GLOBAL';
+}
+
+/** Async: resolve slug /o/.../project-slug/... dari Supabase atau localStorage */
+export async function resolveProjectScopeFromLocationAsync(
+  pathname = window.location.pathname,
+  search = window.location.search
+): Promise<string> {
+  const params = new URLSearchParams(search);
+  const queryProject = params.get('project');
+  if (queryProject) return queryProject;
+
+  const route = parseOutputPath(pathname);
+  if (!route || route.projectSlug === 'default') return 'GLOBAL';
+
+  const fromCloud = await findProjectIdByNameSlug(route.projectSlug);
+  if (fromCloud) return fromCloud;
 
   try {
     const projectKeys = Object.keys(localStorage).filter((k) => k.startsWith('BROHUBS_PROJECTS_'));

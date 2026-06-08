@@ -15,8 +15,22 @@ interface TasksManagementProps {
 }
 
 const CATEGORIES: TaskCategory[] = ['FEATURE', 'OVERLAY', 'SYSTEM', 'WIDGET', 'THEME', 'BUGFIX'];
-const STATUSES: TaskStatus[] = ['PLANNED', 'DEVELOPMENT', 'TESTING', 'RERELEASE_TESTING', 'RELEASED', 'CANCELLED'];
+const STATUSES: TaskStatus[] = ['COMING_SOON', 'PLANNED', 'DEVELOPMENT', 'TESTING', 'RERELEASE_TESTING', 'RELEASED', 'CANCELLED'];
 const PRIORITIES: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+/** Status yang hanya tampil untuk admin (disembunyikan dari member di tab UPDATES) */
+const ADMIN_ONLY_STATUSES: TaskStatus[] = ['DEVELOPMENT'];
+
+const formatStatusLabel = (st: TaskStatus): string => {
+  if (st === 'COMING_SOON') return 'NEW FEATURE';
+  return st.replace(/_/g, ' ');
+};
+
+const resolveProgressForStatus = (st: TaskStatus, prog: number): number => {
+  if (st === 'RELEASED') return 100;
+  if (st === 'COMING_SOON') return 0;
+  return prog;
+};
 
 export const TasksManagement: React.FC<TasksManagementProps> = ({
   tasks,
@@ -70,16 +84,27 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
     window.setTimeout(() => setCopiedFieldId((current) => (current === fieldId ? null : current)), 2000);
   };
 
+  const visibleTasks = useMemo(() => {
+    if (userRole === 'admin') return tasks;
+    return tasks.filter((t) => !ADMIN_ONLY_STATUSES.includes(t.status));
+  }, [tasks, userRole]);
+
+  const visibleStatuses = useMemo(() => {
+    if (userRole === 'admin') return STATUSES;
+    return STATUSES.filter((st) => !ADMIN_ONLY_STATUSES.includes(st));
+  }, [userRole]);
+
   // Stats calculation
   const stats = useMemo(() => {
-    const total = tasks.length;
-    const released = tasks.filter(t => t.status === 'RELEASED').length;
-    const active = tasks.filter(t => t.status === 'DEVELOPMENT' || t.status === 'TESTING' || t.status === 'RERELEASE_TESTING').length;
-    const planned = tasks.filter(t => t.status === 'PLANNED').length;
-    const averageProgress = total > 0 ? Math.round(tasks.reduce((acc, t) => acc + t.progressPercentage, 0) / total) : 0;
+    const total = visibleTasks.length;
+    const released = visibleTasks.filter(t => t.status === 'RELEASED').length;
+    const active = visibleTasks.filter(t => t.status === 'DEVELOPMENT' || t.status === 'TESTING' || t.status === 'RERELEASE_TESTING').length;
+    const planned = visibleTasks.filter(t => t.status === 'PLANNED').length;
+    const comingSoon = visibleTasks.filter(t => t.status === 'COMING_SOON').length;
+    const averageProgress = total > 0 ? Math.round(visibleTasks.reduce((acc, t) => acc + t.progressPercentage, 0) / total) : 0;
     
-    return { total, released, active, planned, averageProgress };
-  }, [tasks]);
+    return { total, released, active, planned, comingSoon, averageProgress };
+  }, [visibleTasks]);
 
   // Open editor for creation
   const handleOpenCreate = () => {
@@ -135,7 +160,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
             priority,
             targetVersion: targetVersion || undefined,
             version: finalVer,
-            progressPercentage: status === 'RELEASED' ? 100 : progressPercentage,
+            progressPercentage: resolveProgressForStatus(status, progressPercentage),
             devNotes: devNotes || undefined,
             updatedAt: nowIso
           };
@@ -154,7 +179,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
         priority,
         targetVersion: targetVersion || undefined,
         version: status === 'RELEASED' ? (version || targetVersion || 'v1.0.0') : undefined,
-        progressPercentage: status === 'RELEASED' ? 100 : progressPercentage,
+        progressPercentage: resolveProgressForStatus(status, progressPercentage),
         devNotes: devNotes || undefined,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -175,7 +200,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
   // Quick action: Promote Status
   const handlePromoteStatus = (task: AppUpdateTask) => {
-    const statusSequence: TaskStatus[] = ['PLANNED', 'DEVELOPMENT', 'TESTING', 'RELEASED'];
+    const statusSequence: TaskStatus[] = ['COMING_SOON', 'PLANNED', 'DEVELOPMENT', 'TESTING', 'RELEASED'];
     const currentIdx = statusSequence.indexOf(task.status);
     if (currentIdx !== -1 && currentIdx < statusSequence.length - 1) {
       const nextStatus = statusSequence[currentIdx + 1];
@@ -249,7 +274,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
   // Filter & Sort Logic
   const filteredTasks = useMemo(() => {
-    return tasks
+    return visibleTasks
       .filter(t => {
         const matchesStatus = selectedStatus === 'ALL' || t.status === selectedStatus;
         const matchesCategory = selectedCategory === 'ALL' || t.category === selectedCategory;
@@ -259,9 +284,9 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
         const matchesSearch = searchQuery === '' || 
           t.title.toLowerCase().includes(textPhrase) || 
           t.description.toLowerCase().includes(textPhrase) || 
-          (t.devNotes && t.devNotes.toLowerCase().includes(textPhrase)) ||
+          (userRole === 'admin' && t.devNotes && t.devNotes.toLowerCase().includes(textPhrase)) ||
           (t.version && t.version.toLowerCase().includes(textPhrase)) ||
-          (t.targetVersion && t.targetVersion.toLowerCase().includes(textPhrase));
+          (userRole === 'admin' && t.targetVersion && t.targetVersion.toLowerCase().includes(textPhrase));
 
         return matchesStatus && matchesCategory && matchesPriority && matchesSearch;
       })
@@ -271,6 +296,12 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
         
         if (isCompletedA !== isCompletedB) {
           return isCompletedA ? 1 : -1;
+        }
+
+        if (userRole === 'member') {
+          const announceA = a.status === 'COMING_SOON';
+          const announceB = b.status === 'COMING_SOON';
+          if (announceA !== announceB) return announceA ? -1 : 1;
         }
 
         if (sortBy === 'NEWEST') {
@@ -288,7 +319,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
         }
         return 0;
       });
-  }, [tasks, selectedStatus, selectedCategory, selectedPriority, searchQuery, sortBy]);
+  }, [visibleTasks, selectedStatus, selectedCategory, selectedPriority, searchQuery, sortBy, userRole]);
 
   // Color functions for Badges
   const getCategoryColor = (cat: TaskCategory) => {
@@ -315,6 +346,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
   const getStatusColor = (st: TaskStatus) => {
     switch (st) {
+      case 'COMING_SOON': return 'text-violet-300 bg-violet-500/10 border-violet-400/30';
       case 'RELEASED': return 'text-[#ccff00] bg-[#ccff00]/10 border-[#ccff00]/20';
       case 'DEVELOPMENT': return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
       case 'TESTING': return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
@@ -341,7 +373,9 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
             System Updates
           </h1>
           <p className="text-zinc-500 text-sm max-w-lg leading-relaxed font-medium">
-            Track overlay releases, system upgrades, modular widgets, and technical bugfixes to organize BroHubs core development.
+            {userRole === 'admin'
+              ? 'Track overlay releases, system upgrades, modular widgets, and technical bugfixes to organize BroHubs core development.'
+              : 'New feature announcements, testing updates, and released patches. Active development items are admin-only.'}
           </p>
         </div>
 
@@ -393,11 +427,11 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
         </div>
 
         {/* Stat 4 */}
-        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-5 hover:border-cyan-500/10 transition-all">
-          <p className="text-[9px] font-black text-zinc-500 tracking-widest uppercase mb-1">PLANNED DEFERRAL</p>
-          <span className="text-2xl font-black text-cyan-400">{stats.planned}</span>
+        <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-5 hover:border-violet-500/10 transition-all">
+          <p className="text-[9px] font-black text-zinc-500 tracking-widest uppercase mb-1">NEW FEATURE INFO</p>
+          <span className="text-2xl font-black text-violet-300">{stats.comingSoon}</span>
           <div className="w-full h-1 bg-zinc-800 rounded-full mt-3 overflow-hidden">
-            <div className="h-full bg-cyan-400" style={{ width: `${stats.total > 0 ? (stats.planned / stats.total) * 100 : 0}%` }} />
+            <div className="h-full bg-violet-400" style={{ width: `${stats.total > 0 ? (stats.comingSoon / stats.total) * 100 : 0}%` }} />
           </div>
         </div>
 
@@ -424,13 +458,13 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
             ALL PIPELINES
           </button>
           
-          {STATUSES.map(st => (
+          {visibleStatuses.map(st => (
             <button 
               key={st}
               onClick={() => setSelectedStatus(st)}
               className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${selectedStatus === st ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.15)]' : 'bg-transparent border-white/5 text-zinc-500 hover:text-white hover:border-white/25'}`}
             >
-              {st.replace('_', ' ')}
+              {formatStatusLabel(st)}
             </button>
           ))}
         </div>
@@ -517,6 +551,9 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
             {task.priority === 'CRITICAL' && (
               <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500/40 to-transparent shadow-[0_0_15px_red]" />
             )}
+            {task.status === 'COMING_SOON' && (
+              <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-violet-400/50 to-transparent shadow-[0_0_15px_violet]" />
+            )}
 
             {/* Header info */}
             <div>
@@ -527,9 +564,11 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                   <span className={`text-[8px] font-black tracking-widest px-2.5 py-1 rounded-lg border uppercase ${getCategoryColor(task.category)}`}>
                     {task.category}
                   </span>
+                  {(userRole === 'admin' || task.status !== 'COMING_SOON') && (
                   <span className={`text-[8px] font-black tracking-widest px-2.5 py-1 rounded-lg border uppercase ${getPriorityColor(task.priority)}`}>
                     {task.priority}
                   </span>
+                  )}
                   
                   {task.version && (
                     <span className="bg-zinc-900 text-zinc-100 hover:text-[#ccff00] border border-white/10 text-[9px] font-mono font-black px-2 py-0.5 rounded-lg flex items-center gap-1">
@@ -547,7 +586,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
 
                 {/* Status indicator */}
                 <span className={`text-[8px] font-black tracking-widest px-2.5 py-1 rounded-lg border uppercase ${getStatusColor(task.status)}`}>
-                  {task.status.replace('_', ' ')}
+                  {formatStatusLabel(task.status)}
                 </span>
                 
               </div>
@@ -597,8 +636,23 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                 </p>
               </div>
 
-              {/* Developer Logs & Notes */}
-              {task.devNotes && (
+              {/* Member-only info banner for upcoming features */}
+              {task.status === 'COMING_SOON' && (
+                <div className="bg-violet-500/5 border border-violet-400/20 rounded-2xl p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-1.5 text-[8px] font-black text-violet-300 tracking-widest uppercase">
+                    <Info size={10} />
+                    <span>New Feature Announcement</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-medium leading-relaxed">
+                    {userRole === 'member'
+                      ? 'This entry is informational only — a preview of an upcoming BroHubs feature. No development progress is shown yet.'
+                      : 'Informational status for members. Switch to PLANNED or DEVELOPMENT when internal work begins.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Developer Logs & Notes — admin only */}
+              {userRole === 'admin' && task.devNotes && (
                 <div className="bg-black/60 border border-white/5 rounded-2xl p-4 mb-4 relative">
                   <div className="flex items-center gap-2 mb-1.5 text-[8px] font-black text-zinc-500 tracking-widest uppercase">
                     <Terminal size={10} className="text-[#ccff00]" />
@@ -610,8 +664,8 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                 </div>
               )}
 
-              {/* Progress Slider (Only seen if active / planned) */}
-              {task.status !== 'RELEASED' && task.status !== 'CANCELLED' && (
+              {/* Progress Slider (hidden for informational COMING_SOON) */}
+              {task.status !== 'RELEASED' && task.status !== 'CANCELLED' && task.status !== 'COMING_SOON' && (
                 <div className="mb-6 bg-black/40 border border-white/5 p-4 rounded-2xl">
                   <div className="flex justify-between items-center mb-1.5">
                     <span className="text-[9px] font-black text-zinc-500 tracking-widest uppercase">PIPELINE MILESTONE</span>
@@ -649,7 +703,8 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
               {/* Member Interaction: Vote / Acknowledge */}
               <div className="flex items-center gap-2">
                 
-                {/* Vote feature request */}
+                {/* Vote — hidden on COMING_SOON (informational only for members) */}
+                {task.status !== 'COMING_SOON' && (
                 <button 
                   onClick={(e) => handleUpvote(task.id, e)}
                   title="Demand / Upvote this update"
@@ -660,6 +715,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                     {task.upvotes || 0}
                   </span>
                 </button>
+                )}
 
                 {/* Mark as read/acknowledged for released versions */}
                 {task.status === 'RELEASED' && (
@@ -872,12 +928,14 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
                       setStatus(newStatus);
                       if (newStatus === 'RELEASED') {
                         setProgressPercentage(100);
+                      } else if (newStatus === 'COMING_SOON') {
+                        setProgressPercentage(0);
                       }
                     }}
                     className="w-full bg-black border border-white/10 rounded-xl p-3 text-xs font-semibold text-white focus:border-[#ccff00] outline-none"
                   >
                     {STATUSES.map(st => (
-                      <option key={st} value={st}>{st.replace('_', ' ')}</option>
+                      <option key={st} value={st}>{formatStatusLabel(st)}</option>
                     ))}
                   </select>
                 </div>
@@ -929,7 +987,7 @@ export const TasksManagement: React.FC<TasksManagementProps> = ({
               </div>
 
               {/* Progress percentage slider */}
-              {status !== 'RELEASED' && status !== 'CANCELLED' && (
+              {status !== 'RELEASED' && status !== 'CANCELLED' && status !== 'COMING_SOON' && (
                 <div className="space-y-2 bg-black/40 border border-white/5 rounded-2xl p-4">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] font-black text-gray-500 tracking-widest uppercase block">Development Progress</label>

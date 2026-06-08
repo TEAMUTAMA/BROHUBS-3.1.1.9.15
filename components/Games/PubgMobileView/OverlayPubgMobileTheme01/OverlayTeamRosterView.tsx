@@ -10,7 +10,7 @@ import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { Theme, Asset, Game, PlayerData } from '../../../../types';
 import PanelControlMonitor, { PreviewControlContext } from '../../../PanelControlMonitor';
 import {
-  ANIMATION_PRESETS,
+  TEAM_ROSTER_ANIMATION_PRESETS,
   AnimationConfig,
   PresetOverride,
   getAnimationSignature,
@@ -21,6 +21,7 @@ import {
   resolveRosterRevealDelay,
   resolveStaggerDelay,
   ROSTER_DEFAULT_WAVE_GAP_SEC,
+  ROSTER_SLOT,
 } from '@/constants/transitions';
 import { notifyCompanionAnimation } from '@/lib/overlayAnimation';
 import { notifyCompanionData } from '@/lib/overlayData';
@@ -73,6 +74,8 @@ interface OverlayTeamRosterViewProps {
   onSelectAsset?: (asset: Asset) => void;
   globalLogo?: string | null;
   projectPlayers?: PlayerData[];
+  /** Set when Member broadcast has a project — Admin GLOBAL studio leaves this null (no SSE). */
+  companionProjectScope?: string | null;
   isGlobalStudio?: boolean;
   showMonitorProp?: boolean;
   programAssetIdProp?: string | null;
@@ -227,6 +230,8 @@ type RosterLayout = {
   playerCardBgMode: 'default' | 'logo' | 'custom';
   playerCardBgCustomUrl: string;
   playerCardBgLogoOpacity: number;
+  /** UI offset — 0 = standar 100% area kartu */
+  playerCardBgLogoScale: number;
   contentOffsetX: number;
   contentOffsetY: number;
   frameCornerCut: number;
@@ -246,6 +251,36 @@ const withRosterSlotWaveGap = (config: AnimationConfig): AnimationConfig =>
     ? { ...config, staggerDelay: ROSTER_SLOT_WAVE_GAP_SEC }
     : config;
 
+/** Gerak OUT khusus roster-default — mirror dramatis dari reveal IN */
+const resolveRosterDefaultExitMotion = (
+  slotIndex: number,
+  total: number,
+  isCaptain?: boolean
+): { x?: number; y: number; scale: number; opacity: number; rotate?: number } => {
+  const last = total - 1;
+  const centerIdx = total >= 3 ? Math.min(ROSTER_SLOT.P3, last) : Math.floor(total / 2);
+
+  if (slotIndex === centerIdx || isCaptain) {
+    return { y: -52, scale: 0.66, opacity: 0 };
+  }
+  if (slotIndex === 0) {
+    return { x: -92, y: 118, scale: 0.78, opacity: 0, rotate: -9 };
+  }
+  if (slotIndex === last) {
+    return { x: 92, y: 118, scale: 0.78, opacity: 0, rotate: 9 };
+  }
+  if (slotIndex === 1) {
+    return { x: -36, y: 82, scale: 0.82, opacity: 0, rotate: -4 };
+  }
+  if (slotIndex === last - 1) {
+    return { x: 36, y: 82, scale: 0.82, opacity: 0, rotate: 4 };
+  }
+  return { y: 72, scale: 0.84, opacity: 0 };
+};
+
+const resolveRosterCenterSlotIndex = (total: number) =>
+  total >= 3 ? Math.min(ROSTER_SLOT.P3, total - 1) : Math.floor(total / 2);
+
 /**
  * Tier vertikal pasangan — items-end + marginBottom:
  * 5P: P1&P5 (bawah) → P2&P4 (naik) → P3 captain (paling tinggi)
@@ -264,6 +299,75 @@ const resolveRosterSlotTierLift = (slotIndex: number, total: number, slotHeight:
   }
   return 0;
 };
+
+/** Nilai 0 di panel layout = baseline render (px / %). */
+const ROSTER_LAYOUT_BASE = {
+  slotWidth: 280,
+  slotHeight: 420,
+  slotGap: 20,
+  captainScale: 118,
+  logoSize: 220,
+  playerPhotoScale: 180,
+  playerCardBgLogoScale: 100,
+  frameCornerCut: 18,
+  contentOffsetX: 0,
+  contentOffsetY: 0,
+} as const;
+
+const ROSTER_PHOTO_POS_Y_BASE = 275;
+
+const ROSTER_LAYOUT_MIGRATION_KEY = 'BROHUBS_TEAMROSTER_LAYOUT_UI_DELTA_V7';
+
+const DEFAULT_ROSTER_LAYOUT_UI: Pick<
+  RosterLayout,
+  | 'slotWidth'
+  | 'slotHeight'
+  | 'slotGap'
+  | 'captainScale'
+  | 'logoSize'
+  | 'playerPhotoScale'
+  | 'playerPhotoOffsetY'
+  | 'frameCornerCut'
+  | 'playerCardBgLogoScale'
+  | 'contentOffsetX'
+  | 'contentOffsetY'
+> = {
+  slotWidth: 0,
+  slotHeight: 0,
+  slotGap: 0,
+  captainScale: 0,
+  logoSize: 0,
+  playerPhotoScale: 0,
+  playerPhotoOffsetY: 0,
+  frameCornerCut: 0,
+  playerCardBgLogoScale: 0,
+  contentOffsetX: 0,
+  contentOffsetY: 0,
+};
+
+const applyStandardRosterLayoutUi = (raw: RosterLayout): RosterLayout => ({
+  ...raw,
+  ...DEFAULT_ROSTER_LAYOUT_UI,
+});
+
+const resolveRosterLayout = (raw: RosterLayout): RosterLayout => ({
+  ...raw,
+  slotWidth: ROSTER_LAYOUT_BASE.slotWidth + (raw.slotWidth ?? 0),
+  slotHeight: ROSTER_LAYOUT_BASE.slotHeight + (raw.slotHeight ?? 0),
+  slotGap: ROSTER_LAYOUT_BASE.slotGap + (raw.slotGap ?? 0),
+  captainScale: ROSTER_LAYOUT_BASE.captainScale + (raw.captainScale ?? 0),
+  logoSize: ROSTER_LAYOUT_BASE.logoSize + (raw.logoSize ?? 0),
+  playerPhotoScale: ROSTER_LAYOUT_BASE.playerPhotoScale + (raw.playerPhotoScale ?? 0),
+  frameCornerCut: ROSTER_LAYOUT_BASE.frameCornerCut + (raw.frameCornerCut ?? 0),
+  playerCardBgLogoScale:
+    ROSTER_LAYOUT_BASE.playerCardBgLogoScale + (raw.playerCardBgLogoScale ?? 0),
+  contentOffsetX: ROSTER_LAYOUT_BASE.contentOffsetX + (raw.contentOffsetX ?? 0),
+  contentOffsetY: ROSTER_LAYOUT_BASE.contentOffsetY + (raw.contentOffsetY ?? 0),
+  playerPhotoOffsetY: ROSTER_PHOTO_POS_Y_BASE + (raw.playerPhotoOffsetY ?? 0),
+});
+
+const layoutBaseHint = (base: number, unit = 'px') =>
+  `0 = standar (${base}${unit})`;
 
 /** Captain scale hanya untuk 5P (P3 wave tengah). 4P: P2&P3 ukuran sama. */
 const resolveRosterSlotScale = (
@@ -337,18 +441,27 @@ const buildRosterPlayerVariants = (config: AnimationConfig): Variants => {
             },
       };
     },
-    exit: (custom: RosterAnimCustom) => ({
-      y: 48,
-      opacity: 0,
-      scale: 0.92,
-      transition: {
-        delay: isRosterDefaultStagger(config)
-          ? resolveRosterRevealDelay(custom.index, custom.total, waveConfig, 0.05, 'out')
-          : resolveExitStaggerDelay(custom.index, custom.total, config),
-        duration: config.duration * 0.65,
-        ease: 'easeIn',
-      },
-    }),
+    exit: (custom: RosterAnimCustom) => {
+      const rosterDefault = isRosterDefaultStagger(config);
+      const exitMotion = rosterDefault
+        ? resolveRosterDefaultExitMotion(custom.index, custom.total, custom.isCaptain)
+        : { y: 48, opacity: 0, scale: 0.92 };
+      const delay = rosterDefault
+        ? resolveRosterRevealDelay(custom.index, custom.total, waveConfig, 0.05, 'out')
+        : resolveExitStaggerDelay(custom.index, custom.total, config);
+      const duration = rosterDefault
+        ? config.duration * (custom.isCaptain ? 0.72 : 0.66)
+        : config.duration * 0.65;
+
+      return {
+        ...exitMotion,
+        transition: {
+          delay,
+          duration,
+          ease: rosterDefault ? [0.55, 0.06, 0.68, 0.48] : 'easeIn',
+        },
+      };
+    },
   };
 };
 
@@ -363,7 +476,15 @@ const buildRosterHeaderAnimTiming = (config: AnimationConfig): AnimationConfig =
 const ROSTER_HEADER_SLIDE_OFFSET = 1100;
 
 /** Judul kiri (TEAM ROSTERS): IN dari kiri → kanan, OUT sebaliknya */
-const buildRosterHeaderTitleVariants = (config: AnimationConfig): Variants => ({
+const buildRosterHeaderTitleVariants = (config: AnimationConfig, filledCount = 5): Variants => {
+  const rosterDefault = isRosterDefaultStagger(config);
+  const waveConfig = withRosterSlotWaveGap(config);
+  const headerOutDelay = rosterDefault
+    ? resolveRosterRevealDelay(ROSTER_SLOT.P1, filledCount, waveConfig, 0.05, 'out') +
+      config.duration * 0.12
+    : 0;
+
+  return {
   initial: { x: -ROSTER_HEADER_SLIDE_OFFSET, opacity: 0 },
   animate: {
     x: 0,
@@ -377,12 +498,25 @@ const buildRosterHeaderTitleVariants = (config: AnimationConfig): Variants => ({
   exit: {
     x: -ROSTER_HEADER_SLIDE_OFFSET,
     opacity: 0,
-    transition: { duration: config.duration * 0.5, ease: 'easeIn' },
+    transition: {
+      delay: headerOutDelay,
+      duration: config.duration * 0.58,
+      ease: [0.45, 0, 0.75, 1],
+    },
   },
-});
+};
+};
 
 /** Subtitle kanan (Round robin…): IN dari kanan → kiri, OUT sebaliknya */
-const buildRosterHeaderSubtitleVariants = (config: AnimationConfig): Variants => ({
+const buildRosterHeaderSubtitleVariants = (config: AnimationConfig, filledCount = 5): Variants => {
+  const rosterDefault = isRosterDefaultStagger(config);
+  const waveConfig = withRosterSlotWaveGap(config);
+  const headerOutDelay = rosterDefault
+    ? resolveRosterRevealDelay(ROSTER_SLOT.P1, filledCount, waveConfig, 0.05, 'out') +
+      config.duration * 0.12
+    : 0;
+
+  return {
   initial: { x: ROSTER_HEADER_SLIDE_OFFSET, opacity: 0 },
   animate: {
     x: 0,
@@ -396,9 +530,14 @@ const buildRosterHeaderSubtitleVariants = (config: AnimationConfig): Variants =>
   exit: {
     x: ROSTER_HEADER_SLIDE_OFFSET,
     opacity: 0,
-    transition: { duration: config.duration * 0.5, ease: 'easeIn' },
+    transition: {
+      delay: headerOutDelay,
+      duration: config.duration * 0.58,
+      ease: [0.45, 0, 0.75, 1],
+    },
   },
-});
+};
+};
 
 const buildRosterSectionVariants = (
   config: AnimationConfig,
@@ -426,6 +565,47 @@ const buildRosterSectionVariants = (
     footer: rosterLastWaveDelay,
   };
   const initialY = phase === 'footer' ? 24 : -28;
+  const rosterDefault = isRosterDefaultStagger(config);
+  const waveConfig = withRosterSlotWaveGap(config);
+  const centerIdx = resolveRosterCenterSlotIndex(filledCount);
+
+  if (rosterDefault) {
+    return {
+      initial: { y: initialY, opacity: 0 },
+      animate: {
+        y: 0,
+        opacity: 1,
+        transition: {
+          delay: delays[phase],
+          duration: config.duration * 0.55,
+          ease: config.easing === 'backOut' ? [0.34, 1.3, 0.64, 1] : config.easing,
+        },
+      },
+      exit:
+        phase === 'footer'
+          ? {
+              y: 40,
+              opacity: 0,
+              scale: 0.94,
+              transition: {
+                delay: config.delay,
+                duration: config.duration * 0.4,
+                ease: 'easeIn',
+              },
+            }
+          : {
+              y: -58,
+              scale: 0.84,
+              opacity: 0,
+              transition: {
+                delay: resolveRosterRevealDelay(centerIdx, filledCount, waveConfig, 0.05, 'out'),
+                duration: config.duration * 0.6,
+                ease: [0.55, 0.06, 0.68, 0.48],
+              },
+            },
+    };
+  }
+
   return {
     initial: { y: initialY, opacity: 0 },
     animate: {
@@ -448,7 +628,7 @@ const buildRosterSectionVariants = (
 const resolvePlayerCardBackground = (
   layout: RosterLayout,
   teamLogo?: string
-): { url: string; fit: 'cover' | 'contain'; opacity: number } | null => {
+): { url: string; fit: 'cover' | 'contain'; opacity: number; scalePct?: number } | null => {
   const mode = layout.playerCardBgMode ?? 'default';
   if (mode === 'logo') {
     const url = teamLogo?.trim();
@@ -457,6 +637,7 @@ const resolvePlayerCardBackground = (
       url,
       fit: 'contain',
       opacity: (layout.playerCardBgLogoOpacity ?? 35) / 100,
+      scalePct: layout.playerCardBgLogoScale,
     };
   }
   if (mode === 'custom') {
@@ -500,8 +681,8 @@ const RosterPlayerSlot = ({
   const scale = slotScale;
   const frameClip = rosterFrameClipPath(layout.frameCornerCut);
   const glowAlpha = isCaptain ? 0.55 : 0.32;
-  const photoScale = (layout.playerPhotoScale ?? 100) / 100;
-  const photoOffsetY = layout.playerPhotoOffsetY ?? 0;
+  const photoScale = layout.playerPhotoScale / 100;
+  const photoOffsetY = layout.playerPhotoOffsetY;
   const cardBackground = resolvePlayerCardBackground(layout, teamLogo);
   const cardBgMode = layout.playerCardBgMode ?? 'default';
 
@@ -544,18 +725,28 @@ const RosterPlayerSlot = ({
           style={{ clipPath: frameClip }}
         >
           {cardBackground && (
-            <img
-              src={cardBackground.url}
-              alt=""
-              className={`absolute inset-0 w-full h-full select-none ${
-                cardBackground.fit === 'cover' ? 'object-cover' : 'object-contain object-center'
-              }`}
-              style={{ opacity: cardBackground.opacity }}
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <img
+                src={cardBackground.url}
+                alt=""
+                className={`select-none max-w-none ${
+                  cardBackground.fit === 'cover' ? 'absolute inset-0 w-full h-full object-cover' : 'object-contain'
+                }`}
+                style={
+                  cardBackground.fit === 'contain'
+                    ? {
+                        width: `${cardBackground.scalePct ?? 100}%`,
+                        height: `${cardBackground.scalePct ?? 100}%`,
+                        opacity: cardBackground.opacity,
+                      }
+                    : { opacity: cardBackground.opacity }
+                }
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </div>
           )}
           <div
             className="absolute inset-0"
@@ -707,8 +898,8 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
   onBack,
   onSelectTheme,
   onSelectAsset,
-  globalLogo,
   projectPlayers = [],
+  companionProjectScope = null,
   isGlobalStudio = false,
   showMonitorProp = true,
   programAssetIdProp,
@@ -770,21 +961,34 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
   });
 
   const [cardLayout, setCardLayout] = useSharedState('BROHUBS_TEAMROSTER_LAYOUT', {
-    slotWidth: 280,
-    slotHeight: 400,
-    slotGap: 20,
-    captainScale: 118,
-    logoSize: 140,
-    playerPhotoScale: 128,
-    playerPhotoOffsetY: 0,
-    playerCardBgMode: 'default',
+    ...DEFAULT_ROSTER_LAYOUT_UI,
+    playerCardBgMode: 'default' as const,
     playerCardBgCustomUrl: '',
     playerCardBgLogoOpacity: 35,
-    contentOffsetX: 0,
-    contentOffsetY: 0,
-    frameCornerCut: 18,
+    playerCardBgLogoScale: 0,
     showHudEffects: false,
   });
+
+  const resetRosterLayoutToStandard = useCallback(() => {
+    setCardLayout((prev) => applyStandardRosterLayoutUi(prev as RosterLayout));
+  }, [setCardLayout]);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(ROSTER_LAYOUT_MIGRATION_KEY)) return;
+    } catch {
+      return;
+    }
+    setCardLayout((prev) => applyStandardRosterLayoutUi(prev as RosterLayout));
+    try {
+      localStorage.setItem(ROSTER_LAYOUT_MIGRATION_KEY, '1');
+    } catch {}
+  }, [setCardLayout]);
+
+  const resolvedCardLayout = useMemo(
+    () => resolveRosterLayout(cardLayout as RosterLayout),
+    [cardLayout]
+  );
 
   const [animationConfig, setAnimationConfig] = useSharedState<AnimationConfig>(
     'BROHUBS_TEAMROSTER_ANIMATION',
@@ -808,6 +1012,22 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
   );
   const [draftAnimationConfig, setDraftAnimationConfig] = useState<AnimationConfig>(animationConfig);
 
+  useEffect(() => {
+    if (visualOnly || monitorFeed) return;
+    if (animationConfig.mode === 'custom') return;
+    const allowedIds = TEAM_ROSTER_ANIMATION_PRESETS.map((p) => p.id);
+    if (allowedIds.includes(animationConfig.presetId ?? '')) return;
+    const rosterPreset =
+      TEAM_ROSTER_ANIMATION_PRESETS.find((p) => p.id === 'roster-reveal') ??
+      TEAM_ROSTER_ANIMATION_PRESETS[0];
+    setAnimationConfig({
+      ...animationConfig,
+      mode: 'default',
+      presetId: rosterPreset.id,
+      ...rosterPreset.config,
+    });
+  }, [animationConfig, monitorFeed, setAnimationConfig, visualOnly]);
+
   const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
   const [programPlayKey, setProgramPlayKey] = useState(0);
   const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
@@ -824,7 +1044,7 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
   }, [replay]);
 
   const effectiveAnimationConfig = useMemo(
-    () => resolveAnimationConfig(animationConfig, presetOverrides, ANIMATION_PRESETS),
+    () => resolveAnimationConfig(animationConfig, presetOverrides, TEAM_ROSTER_ANIMATION_PRESETS),
     [animationConfig, presetOverrides]
   );
 
@@ -832,7 +1052,7 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     () =>
       visualOnly || monitorFeed
         ? effectiveAnimationConfig
-        : resolveAnimationConfig(draftAnimationConfig, presetOverrides, ANIMATION_PRESETS),
+        : resolveAnimationConfig(draftAnimationConfig, presetOverrides, TEAM_ROSTER_ANIMATION_PRESETS),
     [visualOnly, monitorFeed, effectiveAnimationConfig, draftAnimationConfig, presetOverrides]
   );
 
@@ -1051,8 +1271,8 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
       assetId: asset.id,
       animation: effectiveAnimationConfig,
       presetOverrides,
-    });
-  }, [asset.id, effectiveAnimationConfig, presetOverrides, visualOnly]);
+    }, companionProjectScope);
+  }, [asset.id, effectiveAnimationConfig, presetOverrides, visualOnly, companionProjectScope]);
 
   useEffect(() => {
     if (visualOnly) return;
@@ -1067,10 +1287,10 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
           BROHUBS_TEAMROSTER_LAYOUT: cardLayout,
           BROHUBS_TEAMROSTER_PAGINATION: pagination,
         },
-      });
+      }, companionProjectScope);
     }, 400);
     return () => clearTimeout(timer);
-  }, [asset.id, rosterTeams, matchInfo, visualConfig, typography, cardLayout, pagination, visualOnly]);
+  }, [asset.id, rosterTeams, matchInfo, visualConfig, typography, cardLayout, pagination, visualOnly, companionProjectScope]);
 
   const usePmgoTeamColors = visualConfig.usePmgoTeamColors !== false;
   const showHudEffects =
@@ -1133,11 +1353,11 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     const filledCount = team ? getRosterFilledCount(team.players) : 5;
     const captainIdx = team ? resolveCaptainIndex(team) : 2;
     const rosterTypography = typography as RosterTypography;
-    const rosterLayout = cardLayout as RosterLayout;
+    const rosterLayout = resolvedCardLayout;
     const rosterPlayerVariants = buildRosterPlayerVariants(config);
     const headerTiming = buildRosterHeaderAnimTiming(config);
-    const rosterHeaderTitleVariants = buildRosterHeaderTitleVariants(headerTiming);
-    const rosterHeaderSubtitleVariants = buildRosterHeaderSubtitleVariants(headerTiming);
+    const rosterHeaderTitleVariants = buildRosterHeaderTitleVariants(headerTiming, filledCount);
+    const rosterHeaderSubtitleVariants = buildRosterHeaderSubtitleVariants(headerTiming, filledCount);
     const rosterTeamVariants = buildRosterSectionVariants(config, 'team', filledCount);
     const rosterFooterVariants = buildRosterSectionVariants(config, 'footer', filledCount);
 
@@ -1156,12 +1376,6 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
         }}
       >
         <RosterSceneBackdrop colors={resolvedGlobalColors} showHud={showHudEffects} />
-
-        {globalLogo && (
-          <div className="absolute top-10 left-10 z-40">
-            <img src={globalLogo} alt="Global Logo" className="h-20 w-auto object-contain drop-shadow-2xl" />
-          </div>
-        )}
 
         <div className="absolute inset-0">
           <div
@@ -1447,9 +1661,9 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     feedPlayKey,
     playKey,
     style,
-    globalLogo,
     activeAnimConfig,
     cardLayout,
+    resolvedCardLayout,
     rosterFontFamily,
     resolvedGlobalColors,
     typography,
@@ -1463,7 +1677,10 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     sponsors,
   ]);
 
-  const livePreviewContent = useMemo(() => renderLivePreview(), [renderLivePreview]);
+  const livePreviewContent = useMemo(
+    () => renderLivePreview(undefined, effectiveAnimationConfig),
+    [renderLivePreview, effectiveAnimationConfig]
+  );
   const programFeedContent = useMemo(
     () => renderLivePreview(programPlayKey, effectiveAnimationConfig),
     [renderLivePreview, programPlayKey, effectiveAnimationConfig]
@@ -1475,7 +1692,7 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
     }
   }, [livePreviewContent, onPreviewContentChange, visualOnly]);
 
-  if (visualOnly) return renderLivePreview(feedPlayKey);
+  if (visualOnly) return renderLivePreview(feedPlayKey, effectiveAnimationConfig);
 
   return (
     <div className="flex flex-col h-full bg-black animate-in fade-in duration-300 font-sans select-none overflow-hidden rounded-tl-[10px] border-l border-t border-white/5">
@@ -2129,81 +2346,122 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                   )}
 
                   <div className="p-6 bg-zinc-900 border border-white/5 rounded-[20px]">
-                    <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                      <Move size={12} className="text-blue-500" />
-                      ROSTER LAYOUT (16:9)
-                    </h3>
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <h3 className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                        <Move size={12} className="text-blue-500" />
+                        ROSTER LAYOUT (16:9)
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={resetRosterLayoutToStandard}
+                        className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[8px] font-black text-[#ccff00] uppercase tracking-widest hover:bg-[#ccff00]/10 hover:border-[#ccff00]/30"
+                      >
+                        Reset Standar
+                      </button>
+                    </div>
                     <div className="grid grid-cols-4 gap-3">
+                      <p className="col-span-4 text-[7px] text-zinc-600 normal-case -mt-1 mb-1">
+                        Nilai <strong className="text-[#74a57f]">0</strong> = standar render di setiap kolom.
+                      </p>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SLOT W</label>
                         <ScrollableInput
-                          value={cardLayout.slotWidth ?? 280}
+                          value={cardLayout.slotWidth ?? 0}
                           onChange={(val) => setCardLayout({ ...cardLayout, slotWidth: val })}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.slotWidth)}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">SLOT H</label>
                         <ScrollableInput
-                          value={cardLayout.slotHeight ?? 400}
+                          value={cardLayout.slotHeight ?? 0}
                           onChange={(val) => setCardLayout({ ...cardLayout, slotHeight: val })}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.slotHeight)}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">GAP</label>
                         <ScrollableInput
-                          value={cardLayout.slotGap ?? 20}
+                          value={cardLayout.slotGap ?? 0}
                           onChange={(val) => setCardLayout({ ...cardLayout, slotGap: val })}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.slotGap)}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">CAPTAIN %</label>
                         <ScrollableInput
-                          value={cardLayout.captainScale ?? 118}
-                          onChange={(val) =>
+                          value={cardLayout.captainScale ?? 0}
+                          onChange={(val) => {
+                            const resolved = ROSTER_LAYOUT_BASE.captainScale + val;
+                            const clamped = Math.max(100, Math.min(140, resolved));
                             setCardLayout({
                               ...cardLayout,
-                              captainScale: Math.max(100, Math.min(140, val)),
-                            })
-                          }
+                              captainScale: clamped - ROSTER_LAYOUT_BASE.captainScale,
+                            });
+                          }}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.captainScale, '%')}
+                        </p>
                       </div>
                       <div>
-                        <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">LOGO SIZE</label>
+                        <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
+                          LOGO ATAS TIM
+                        </label>
                         <ScrollableInput
-                          value={cardLayout.logoSize ?? 140}
+                          value={cardLayout.logoSize ?? 0}
                           onChange={(val) => setCardLayout({ ...cardLayout, logoSize: val })}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.logoSize)} · di atas nama tim, bukan background kartu
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">FRAME CUT</label>
                         <ScrollableInput
-                          value={cardLayout.frameCornerCut ?? 18}
-                          onChange={(val) =>
+                          value={cardLayout.frameCornerCut ?? 0}
+                          onChange={(val) => {
+                            const resolved = ROSTER_LAYOUT_BASE.frameCornerCut + val;
+                            const clamped = Math.max(4, Math.min(40, resolved));
                             setCardLayout({
                               ...cardLayout,
-                              frameCornerCut: Math.max(4, Math.min(40, val)),
-                            })
-                          }
+                              frameCornerCut: clamped - ROSTER_LAYOUT_BASE.frameCornerCut,
+                            });
+                          }}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.frameCornerCut)}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">PHOTO SCALE</label>
                         <ScrollableInput
-                          value={cardLayout.playerPhotoScale ?? 100}
-                          onChange={(val) =>
+                          value={cardLayout.playerPhotoScale ?? 0}
+                          onChange={(val) => {
+                            const resolved = ROSTER_LAYOUT_BASE.playerPhotoScale + val;
+                            const clamped = Math.max(80, Math.min(180, resolved));
                             setCardLayout({
                               ...cardLayout,
-                              playerPhotoScale: Math.max(80, Math.min(180, val)),
-                            })
-                          }
+                              playerPhotoScale: clamped - ROSTER_LAYOUT_BASE.playerPhotoScale,
+                            });
+                          }}
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_LAYOUT_BASE.playerPhotoScale, '%')}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">PHOTO POS Y</label>
@@ -2217,6 +2475,9 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                           }
                           className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
                         />
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          {layoutBaseHint(ROSTER_PHOTO_POS_Y_BASE)}
+                        </p>
                       </div>
                       <div>
                         <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">OFFSET X/Y</label>
@@ -2232,6 +2493,9 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                             className="w-full bg-black border border-white/10 rounded-lg px-1 py-2 text-[10px] text-white text-center"
                           />
                         </div>
+                        <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                          X/Y {layoutBaseHint(0)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -2269,20 +2533,44 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                       ))}
                     </div>
                     {(cardLayout.playerCardBgMode ?? 'default') === 'logo' && (
-                      <div>
-                        <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
-                          LOGO OPACITY (%)
-                        </label>
-                        <ScrollableInput
-                          value={cardLayout.playerCardBgLogoOpacity ?? 35}
-                          onChange={(val) =>
-                            setCardLayout({ ...cardLayout, playerCardBgLogoOpacity: val })
-                          }
-                          className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
-                        />
-                        <p className="text-[7px] text-zinc-600 normal-case mt-1.5">
-                          Menggunakan logo tim per card dari data roster / Overall Ranking.
-                        </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
+                            LOGO BG SIZE
+                          </label>
+                          <ScrollableInput
+                            value={cardLayout.playerCardBgLogoScale ?? 0}
+                            onChange={(val) => {
+                              const resolved =
+                                ROSTER_LAYOUT_BASE.playerCardBgLogoScale + val;
+                              const clamped = Math.max(25, Math.min(200, resolved));
+                              setCardLayout({
+                                ...cardLayout,
+                                playerCardBgLogoScale:
+                                  clamped - ROSTER_LAYOUT_BASE.playerCardBgLogoScale,
+                              });
+                            }}
+                            className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                          />
+                          <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                            {layoutBaseHint(ROSTER_LAYOUT_BASE.playerCardBgLogoScale, '%')} · background kartu
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
+                            LOGO OPACITY (%)
+                          </label>
+                          <ScrollableInput
+                            value={cardLayout.playerCardBgLogoOpacity ?? 35}
+                            onChange={(val) =>
+                              setCardLayout({ ...cardLayout, playerCardBgLogoOpacity: val })
+                            }
+                            className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white text-center"
+                          />
+                          <p className="text-[7px] text-zinc-600 normal-case mt-1">
+                            Transparansi logo di background kartu pemain
+                          </p>
+                        </div>
                       </div>
                     )}
                     {(cardLayout.playerCardBgMode ?? 'default') === 'custom' && (
@@ -2304,14 +2592,14 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                         </p>
                         <p className="text-[7px] text-[#74a57f]/90 normal-case mt-2 border border-[#74a57f]/20 bg-[#74a57f]/5 rounded-lg px-2.5 py-2 leading-relaxed">
                           <strong className="text-[#a3cfaa]">Rekomendasi ukuran:</strong>{' '}
-                          {cardLayout.slotWidth ?? 280}×{cardLayout.slotHeight ?? 400}px (standar · ikut SLOT W/H)
+                          {resolvedCardLayout.slotWidth}×{resolvedCardLayout.slotHeight}px (standar · ikut SLOT W/H)
                           {' · '}
-                          {Math.round((cardLayout.slotWidth ?? 280) * ((cardLayout.captainScale ?? 118) / 100))}×
-                          {Math.round((cardLayout.slotHeight ?? 400) * ((cardLayout.captainScale ?? 118) / 100))}
+                          {Math.round(resolvedCardLayout.slotWidth * (resolvedCardLayout.captainScale / 100))}×
+                          {Math.round(resolvedCardLayout.slotHeight * (resolvedCardLayout.captainScale / 100))}
                           px (captain · slot terbesar)
                           {' · '}
-                          {(cardLayout.slotWidth ?? 280) * 2}×{(cardLayout.slotHeight ?? 400) * 2}px (2× retina).
-                          Rasio portrait {cardLayout.slotWidth ?? 280}:{cardLayout.slotHeight ?? 400}.
+                          {resolvedCardLayout.slotWidth * 2}×{resolvedCardLayout.slotHeight * 2}px (2× retina).
+                          Rasio portrait {resolvedCardLayout.slotWidth}:{resolvedCardLayout.slotHeight}.
                         </p>
                       </div>
                     )}
@@ -2326,7 +2614,8 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                       type="button"
                       onClick={() => {
                         const rosterPreset =
-                          ANIMATION_PRESETS.find((p) => p.id === 'roster-reveal') ?? ANIMATION_PRESETS[0];
+                          TEAM_ROSTER_ANIMATION_PRESETS.find((p) => p.id === 'roster-reveal') ??
+                          TEAM_ROSTER_ANIMATION_PRESETS[0];
                         setAnimationConfig({
                           ...animationConfig,
                           mode: 'default',
@@ -2564,7 +2853,7 @@ const OverlayTeamRosterView: React.FC<OverlayTeamRosterViewProps> = ({
                     </>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {ANIMATION_PRESETS.map((preset) => {
+                      {TEAM_ROSTER_ANIMATION_PRESETS.map((preset) => {
                         const merged = { ...preset.config, ...presetOverrides[preset.id] };
                         const isActive = animationConfig.presetId === preset.id;
                         return (

@@ -106,11 +106,11 @@ export function buildTopFraggersFromMatch(
     rank: index + 1,
     name: row.name,
     team: row.team,
-    teamLogo: row.teamLogo || teamLogoDefault,
+    teamLogo: row.teamLogo?.trim() || teamLogoDefault,
     elims: row.elims,
     damage: 0,
     survival: survivalDefault,
-    image: row.image || imageDefault,
+    image: row.image?.trim() || imageDefault,
   }));
 
   while (built.length < slots) {

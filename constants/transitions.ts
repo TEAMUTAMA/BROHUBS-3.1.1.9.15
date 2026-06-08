@@ -87,7 +87,7 @@ export const ANIMATION_PRESETS: {
     id: 'roster-reveal',
     name: 'Roster Default',
     description:
-      '5P: P1&P5 → (2s) → P2&P4 → (2s) → P3. 4P: P1&P4 → P2&P3. Berlaku IN, OUT & ganti halaman.',
+      'IN: P1&P5 → P2&P4 → P3. OUT: footer turun → captain ciut → pasangan turun → sayap melebar → header geser.',
     config: {
       inType: 'slide-up',
       outType: 'slide-down',
@@ -101,6 +101,11 @@ export const ANIMATION_PRESETS: {
     },
   },
 ];
+
+/** Preset transisi khusus Team Roster — PRESET MODE hanya menampilkan ini */
+export const TEAM_ROSTER_ANIMATION_PRESETS = ANIMATION_PRESETS.filter(
+  (p) => p.id === 'roster-reveal' || p.id === 'minimal'
+);
 
 /** Jeda antar wave roster default (detik) */
 export const ROSTER_DEFAULT_WAVE_GAP_SEC = 2;

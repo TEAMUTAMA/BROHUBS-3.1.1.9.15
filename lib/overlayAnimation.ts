@@ -21,6 +21,7 @@ export interface CompanionAnimationPayload {
   assetId: string;
   animation: AnimationConfig;
   presetOverrides?: Record<string, PresetOverride>;
+  projectScope?: string;
 }
 
 export function applyCompanionSharedState<T>(key: string, value: T): void {
@@ -46,12 +47,16 @@ export function applyCompanionAnimationPayload(payload: CompanionAnimationPayloa
   }
 }
 
-export async function notifyCompanionAnimation(payload: CompanionAnimationPayload): Promise<void> {
+export async function notifyCompanionAnimation(
+  payload: CompanionAnimationPayload,
+  projectScope?: string | null
+): Promise<void> {
+  if (!projectScope) return;
   try {
     await fetch('/api/companion/animation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, projectScope }),
     });
   } catch (err) {
     console.warn('Companion animation sync failed:', err);

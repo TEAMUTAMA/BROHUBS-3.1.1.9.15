@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Member, Asset, Project } from '../../types';
 import { useSharedState } from '../../lib/useSharedState';
-import { getProgramLayersKey } from '../../lib/programLayers';
+import { getProgramLayersKey, getPreviewAssetKey } from '../../lib/programLayers';
 
 // ============================================================================
 // SELF-CONTAINED UTILITY: Robust copy-to-clipboard (iframe & non-HTTPS safe)
@@ -43,7 +43,10 @@ interface MemberOutputViewProps {
 }
 
 const AssetStatusBadge: React.FC<{ asset: Asset; project: Project | undefined }> = ({ asset, project }) => {
-  const [previewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
+  const [previewAssetId] = useSharedState<string | null>(
+    getPreviewAssetKey(project?.id),
+    null
+  );
   const [programLayers] = useSharedState<Record<number, string | null>>(
     getProgramLayersKey(project?.id),
     { 1: null, 2: null, 3: null, 4: null, 5: null }

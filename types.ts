@@ -30,7 +30,10 @@ export interface Member {
   status: 'ONLINE' | 'IN STREAM' | 'OFFLINE';
   package: string;
   initial: string;
+  /** Kode verifikasi sekali pakai dari Admin (BHS...) — bukan password login */
   tempPassword?: string;
+  /** Password login permanen yang member buat sendiri */
+  loginPassword?: string;
   expiryDate: string; // ISO String
   extensionPending?: boolean;
   requestedPackage?: string; // New: Stores the package tier requested by the member
@@ -108,7 +111,7 @@ export interface Ad {
 }
 
 export type TaskCategory = 'OVERLAY' | 'SYSTEM' | 'WIDGET' | 'THEME' | 'BUGFIX' | 'FEATURE';
-export type TaskStatus = 'PLANNED' | 'DEVELOPMENT' | 'TESTING' | 'RERELEASE_TESTING' | 'RELEASED' | 'CANCELLED';
+export type TaskStatus = 'COMING_SOON' | 'PLANNED' | 'DEVELOPMENT' | 'TESTING' | 'RERELEASE_TESTING' | 'RELEASED' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface AppUpdateTask {

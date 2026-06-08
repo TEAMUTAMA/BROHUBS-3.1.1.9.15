@@ -3,6 +3,7 @@ import { applyCompanionSharedState } from './overlayAnimation';
 export interface CompanionDataPayload {
   assetId: string;
   data: Record<string, unknown>;
+  projectScope?: string;
 }
 
 /** Hanya Overall Ranking yang boleh menulis state match/teams ke storage (hindari stale echo SSE). */
@@ -30,12 +31,16 @@ export function applyCompanionDataPayload(payload: CompanionDataPayload): void {
   }
 }
 
-export async function notifyCompanionData(payload: CompanionDataPayload): Promise<void> {
+export async function notifyCompanionData(
+  payload: CompanionDataPayload,
+  projectScope?: string | null
+): Promise<void> {
+  if (!projectScope) return;
   try {
     await fetch('/api/companion/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, projectScope }),
     });
   } catch (err) {
     console.warn('Companion data sync failed:', err);

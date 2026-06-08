@@ -62,7 +62,7 @@ import {
   Trash2,
   Upload,
   ShieldCheck,
-  ClipboardList
+  Sparkles
 } from 'lucide-react';
 import MemberOutputView from '../DashboardMember/MemberOutputView';
 import MemberManagement from '../MemberManagement';
@@ -87,6 +87,20 @@ import { Member, Game, Theme, Asset, AccessTier, Project, PlayerData, Ad, AppUpd
 import { getMembers, saveMembers } from '../../services/memberService';
 import { getGames, saveGames, saveThemes, getThemes, getDefaultGames } from '../../services/gameService';
 import { getTasks, saveTasks } from '../../services/taskService';
+import {
+  loadUserProjects,
+  loadProjectsForOwners,
+  saveUserProjects,
+  saveUserHistory,
+} from '../../services/projectService';
+import {
+  applyMemberLoginPassword,
+  findMemberByEmail,
+  isPasswordlessMember,
+  memberNeedsPasswordSetup,
+  normalizeMemberEmail,
+} from '../../services/memberAuth';
+import MemberPasswordSetupModal from '../MemberPasswordSetupModal';
 
 interface DashboardProps {
   globalLogo: string | null;
@@ -106,6 +120,8 @@ interface DashboardProps {
   onGlobalReset?: () => void;
   onAdminUpload?: (logo: string) => void;
   onAdminReset?: () => void;
+  requiresPasswordSetup?: boolean;
+  onClearPasswordSetup?: () => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ 
@@ -125,7 +141,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   onGlobalUpload,
   onGlobalReset,
   onAdminUpload,
-  onAdminReset
+  onAdminReset,
+  requiresPasswordSetup = false,
+  onClearPasswordSetup,
 }) => {
   const [uptime, setUptime] = useState('0h 0m 0s');
   const [isExpanded, setIsExpanded] = useState(false);
@@ -155,7 +173,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [themes, setThemes] = useState<Theme[]>([]);
   const [tasks, setTasks] = useState<AppUpdateTask[]>([]);
   const [projects, setProjects] = useState<Project[]>([]); 
-  const [historyProjects, setHistoryProjects] = useState<Project[]>([]); 
+  const [historyProjects, setHistoryProjects] = useState<Project[]>([]);
+  const [memberProjectsByOwner, setMemberProjectsByOwner] = useState<Record<string, Project[]>>({}); 
   const [isLoading, setIsLoading] = useState(true);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   
@@ -167,6 +186,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const [showMemberSuccessModal, setShowMemberSuccessModal] = useState(false);
   const [generatedNewPassword, setGeneratedNewPassword] = useState('');
+  const [showPasswordSetup, setShowPasswordSetup] = useState(false);
+  const [passwordSetupVoluntary, setPasswordSetupVoluntary] = useState(false);
   const [isCopiedNewPass, setIsCopiedNewPass] = useState(false);
   const [isCopiedOutput, setIsCopiedOutput] = useState(false);
   const [activePopUpAd, setActivePopUpAd] = useState<Ad | null>(null);
@@ -234,9 +255,6 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // DYNAMIC KEYS FOR ACCOUNT ISOLATION
   const userIdentifier = useMemo(() => currentUserEmail || 'GUEST', [currentUserEmail]);
-  const PROJECTS_STORAGE_KEY = useMemo(() => `BROHUBS_PROJECTS_${userIdentifier}`, [userIdentifier]);
-  const HISTORY_STORAGE_KEY = useMemo(() => `BROHUBS_PROJECTS_HISTORY_${userIdentifier}`, [userIdentifier]);
-
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
@@ -250,20 +268,17 @@ const Dashboard: React.FC<DashboardProps> = ({
             getTasks()
         ]);
         
-        // Load User Specific Projects
-        const savedProjects = localStorage.getItem(PROJECTS_STORAGE_KEY);
-        if (savedProjects) {
-          setProjects(JSON.parse(savedProjects));
-        } else {
-          setProjects([]); // Clear for new user
-        }
+        // Load user projects (Supabase atau localStorage)
+        const { projects: savedProjects, history: savedHistory } = await loadUserProjects(userIdentifier);
+        setProjects(savedProjects);
+        setHistoryProjects(savedHistory);
 
-        const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
-        if (savedHistory) {
-          setHistoryProjects(JSON.parse(savedHistory));
-        } else {
-          setHistoryProjects([]); // Clear for new user
-        }
+        const ownerEmails = [
+          ...new Set([userIdentifier, 'alex@brohubs.com', ...fetchedMembers.map((m) => m.email)]),
+        ];
+        const projectsByOwner = await loadProjectsForOwners(ownerEmails);
+        projectsByOwner[userIdentifier] = savedProjects;
+        setMemberProjectsByOwner(projectsByOwner);
 
         setMembers(fetchedMembers);
         setGames(fetchedGames);
@@ -277,7 +292,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       }
     };
     fetchData();
-  }, [currentUserEmail, PROJECTS_STORAGE_KEY, HISTORY_STORAGE_KEY]); // Dependency on Email Change
+  }, [currentUserEmail, userIdentifier]); // Dependency on Email Change
 
   useEffect(() => {
     if (isDataLoaded) {
@@ -304,27 +319,22 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, [tasks, isDataLoaded]);
 
   useEffect(() => {
-    if (isDataLoaded) {
-      try {
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-      } catch (e) {
-        console.warn("Storage full!", e);
-        if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-          alert("DATABASE STORAGE IS FULL. PLEASE REMOVE SOME PROJECTS OR USE SMALLER IMAGES.");
-        }
+    if (!isDataLoaded) return;
+    saveUserProjects(userIdentifier, projects).catch((e) => {
+      console.warn('Failed to save projects', e);
+      if (e instanceof Error && e.message.includes('FULL')) {
+        alert(e.message);
       }
-    }
-  }, [projects, isDataLoaded, PROJECTS_STORAGE_KEY]);
+    });
+    setMemberProjectsByOwner((prev) => ({ ...prev, [userIdentifier]: projects }));
+  }, [projects, isDataLoaded, userIdentifier]);
 
   useEffect(() => {
-    if (isDataLoaded) {
-      try {
-        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(historyProjects));
-      } catch (e) {
-        console.warn("History storage quota exceeded.", e);
-      }
-    }
-  }, [historyProjects, isDataLoaded, HISTORY_STORAGE_KEY]);
+    if (!isDataLoaded) return;
+    saveUserHistory(userIdentifier, historyProjects).catch((e) => {
+      console.warn('History storage save failed.', e);
+    });
+  }, [historyProjects, isDataLoaded, userIdentifier]);
 
   useEffect(() => {
     if (userRole === 'member' && isDataLoaded && members.length > 0) {
@@ -354,6 +364,57 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   }, [userRole, isDataLoaded, currentMemberEmail, currentUserEmail, members]);
 
+  useEffect(() => {
+    if (userRole !== 'member' || !isDataLoaded) return;
+    const email = currentUserEmail || currentMemberEmail;
+    if (!email) return;
+    const member = findMemberByEmail(members, email);
+    if (!member) return;
+
+    if (requiresPasswordSetup || memberNeedsPasswordSetup(member)) {
+      setShowPasswordSetup(true);
+      if (!passwordSetupVoluntary) {
+        setPasswordSetupVoluntary(false);
+      }
+    } else if (!passwordSetupVoluntary) {
+      setShowPasswordSetup(false);
+    }
+  }, [
+    requiresPasswordSetup,
+    userRole,
+    isDataLoaded,
+    members,
+    currentUserEmail,
+    currentMemberEmail,
+    passwordSetupVoluntary,
+  ]);
+
+  const handleMemberPasswordSetup = (verificationCode: string, newPassword: string): string | null => {
+    const email = currentUserEmail || currentMemberEmail;
+    if (!email) {
+      return 'Akun member tidak ditemukan. Silakan login ulang.';
+    }
+
+    const member = findMemberByEmail(members, email);
+    if (!member) {
+      return `Data member ${normalizeMemberEmail(email)} tidak ditemukan. Hubungi Admin.`;
+    }
+
+    const result = applyMemberLoginPassword(member, verificationCode, newPassword);
+    if (!result.ok) {
+      return result.error;
+    }
+
+    const updatedMembers = members.map((m) =>
+      normalizeMemberEmail(m.email) === normalizeMemberEmail(email) ? result.member : m
+    );
+    setMembers(updatedMembers);
+    void saveMembers(updatedMembers);
+    setPasswordSetupVoluntary(false);
+    onClearPasswordSetup?.();
+    return null;
+  };
+
   const generateSystemPassword = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let pass = "BHS";
@@ -371,18 +432,14 @@ const Dashboard: React.FC<DashboardProps> = ({
      const email = currentUserEmail || currentMemberEmail || (members.length > 0 ? members[0].email : '');
      if (!email) return;
 
-     const newPass = generateSystemPassword();
-     setGeneratedNewPassword(newPass);
-     setIsCopiedNewPass(false);
-
      setMembers(prev => prev.map(m => {
         if (m.email === email) {
-            return { ...m, resetStatus: 'CONFIRMED', tempPassword: newPass };
+            return { ...m, resetStatus: 'CONFIRMED', needsNewPassword: true };
         }
         return m;
      }));
 
-     setShowMemberSuccessModal(true);
+     window.alert('Permintaan reset diterima. Tunggu Admin kirim kode verifikasi baru, lalu buat password baru.');
   };
 
   const handleSubAction = (action: 'CONTINUE' | 'EXTEND' | 'CANCEL') => {
@@ -728,7 +785,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     { icon: LayoutTemplate, label: 'STUDIO', roles: ['admin'] },
     { icon: Radio, label: 'BROADCAST', roles: ['admin', 'member'] },
     { icon: Share2, label: 'OUTPUT', roles: ['admin', 'member'] },
-    { icon: ClipboardList, label: 'TASKS', roles: ['admin', 'member'] },
+    { icon: Sparkles, label: 'UPDATES', roles: ['admin', 'member'] },
     { icon: SettingsIcon, label: 'SETTINGS', roles: ['admin'] },
     { icon: Users, label: 'MEMBER', roles: ['admin'], notification: resetRequests.length > 0 || pendingExtensionCount > 0 },
   ];
@@ -759,9 +816,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const getActiveMember = () => {
-    const targetEmail = currentUserEmail || currentMemberEmail || (members.length > 0 ? members[0].email : null);
+    const targetEmail = currentUserEmail || currentMemberEmail;
     if (!targetEmail) return null;
-    return members.find(m => m.email === targetEmail) || null;
+    return findMemberByEmail(members, targetEmail) ?? null;
   };
 
   const getSidebarPlanLabel = () => {
@@ -878,24 +935,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     };
 
-    // Load admin / guest projects
-    addProjsAndAssetsForOwner('alex@brohubs.com', projects);
-
-    // Load member projects
-    members.forEach(m => {
-      try {
-        const key = `BROHUBS_PROJECTS_${m.email}`;
-        const dataStr = localStorage.getItem(key);
-        if (dataStr) {
-          const projs = JSON.parse(dataStr);
-          if (Array.isArray(projs)) {
-            addProjsAndAssetsForOwner(m.email, projs);
-          }
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    });
+    // Load projects dari Supabase / cache (semua member)
+    for (const [ownerId, projs] of Object.entries(memberProjectsByOwner) as [string, Project[]][]) {
+      addProjsAndAssetsForOwner(ownerId, projs);
+    }
 
     // Backport fallback items matching the requested screen layout
     if (unifiedAssets.filter(a => a.ownerId === 'alex@brohubs.com').length === 0) {
@@ -1106,7 +1149,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       return renderOutputView();
     }
 
-    if (activeTab === 'TASKS') {
+    if (activeTab === 'UPDATES') {
       return (
         <TasksManagement 
           tasks={tasks}
@@ -1439,7 +1482,19 @@ const Dashboard: React.FC<DashboardProps> = ({
           ); 
         })}</div>
 
-        <div className="hidden md:flex mt-auto space-y-4 w-full flex-col items-center"><div className={`rounded-2xl bg-zinc-900/50 border border-white/5 flex flex-col transition-all overflow-hidden ${isExpanded ? 'p-4 w-full' : 'p-3 w-14 items-center justify-center'}`}>{isExpanded ? (<><div className="flex items-center gap-2 mb-1"><Clock size={10} className="text-gray-500" /><p className="text-[8px] font-bold text-gray-600 tracking-widest uppercase">UPTIME</p></div><p className="text-[#ccff00] font-mono text-[10px]">{uptime}</p></>) : (<Clock size={20} className="text-[#ccff00] animate-pulse" />)}</div><button onClick={onExit} className={`border border-white/10 rounded-2xl font-bold tracking-[0.2em] uppercase hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-500 transition-all active:scale-95 flex items-center justify-center ${isExpanded ? 'w-full py-4 text-[10px]' : 'w-14 h-14'}`}>{isExpanded ? (<div className="flex items-center gap-2"><LogOut size={14} /><span>EXIT</span></div>) : (<LogOut size={20} />)}</button></div>
+        <div className="hidden md:flex mt-auto space-y-4 w-full flex-col items-center">
+          {userRole === 'member' && isExpanded && getActiveMember() && !isPasswordlessMember(getActiveMember()!) && (
+            <button
+              onClick={() => {
+                setPasswordSetupVoluntary(true);
+                setShowPasswordSetup(true);
+              }}
+              className="w-full py-3 rounded-2xl border border-white/10 text-[9px] font-black tracking-widest uppercase text-zinc-400 hover:text-[#ccff00] hover:border-[#ccff00]/30 transition-all flex items-center justify-center gap-2"
+            >
+              <Key size={12} /> GANTI PASSWORD
+            </button>
+          )}
+          <div className={`rounded-2xl bg-zinc-900/50 border border-white/5 flex flex-col transition-all overflow-hidden ${isExpanded ? 'p-4 w-full' : 'p-3 w-14 items-center justify-center'}`}>{isExpanded ? (<><div className="flex items-center gap-2 mb-1"><Clock size={10} className="text-gray-500" /><p className="text-[8px] font-bold text-gray-600 tracking-widest uppercase">UPTIME</p></div><p className="text-[#ccff00] font-mono text-[10px]">{uptime}</p></>) : (<Clock size={20} className="text-[#ccff00] animate-pulse" />)}</div><button onClick={onExit} className={`border border-white/10 rounded-2xl font-bold tracking-[0.2em] uppercase hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-500 transition-all active:scale-95 flex items-center justify-center ${isExpanded ? 'w-full py-4 text-[10px]' : 'w-14 h-14'}`}>{isExpanded ? (<div className="flex items-center gap-2"><LogOut size={14} /><span>EXIT</span></div>) : (<LogOut size={20} />)}</button></div>
       </aside>
       
       <main className="flex-1 overflow-y-auto overflow-x-hidden bg-zinc-950/20 relative z-10 pb-24 md:pb-0">
@@ -1558,6 +1613,23 @@ const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* Verification modal for Admin entering Member POV */}
+      {showPasswordSetup && getActiveMember() && (
+        <MemberPasswordSetupModal
+          memberName={getActiveMember()!.name}
+          isFirstSetup={!getActiveMember()!.loginPassword}
+          onSubmit={handleMemberPasswordSetup}
+          onCancel={
+            passwordSetupVoluntary
+              ? () => {
+                  setShowPasswordSetup(false);
+                  setPasswordSetupVoluntary(false);
+                }
+              : undefined
+          }
+          allowCancel={passwordSetupVoluntary}
+        />
+      )}
+
       {verificationMember && (
         <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300" onClick={() => setVerificationMember(null)} />

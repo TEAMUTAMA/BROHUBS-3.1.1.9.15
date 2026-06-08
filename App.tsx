@@ -17,6 +17,7 @@ const App: React.FC = () => {
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [userRole, setUserRole] = useState<'admin' | 'member'>('admin');
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
+  const [memberRequiresPasswordSetup, setMemberRequiresPasswordSetup] = useState(false);
   
   const [adminTier, setAdminTier] = useState<'BASIC' | 'PREMIUM' | 'ULTIMATE'>('ULTIMATE');
   const [globalLogo, setGlobalLogo] = useState<string | null>(null);
@@ -37,12 +38,12 @@ const App: React.FC = () => {
     const savedAdmin = localStorage.getItem('adminLogo');
     if (savedGlobal) setGlobalLogo(savedGlobal);
     if (savedAdmin) setAdminLogo(savedAdmin);
-    setAds(getAds());
+    getAds().then(setAds);
   }, []);
 
   const handleUpdateAds = (newAds: Ad[]) => {
     setAds(newAds);
-    saveAds(newAds);
+    void saveAds(newAds);
   };
 
   const handleGlobalLogoUpload = (logoBase64: string) => {
@@ -92,7 +93,9 @@ const App: React.FC = () => {
         userRole={userRole}
         currentUserEmail={currentUserEmail}
         onSwitchRole={setUserRole}
-        onExit={() => { setView('landing'); setCurrentUserEmail(''); }} 
+        onExit={() => { setView('landing'); setCurrentUserEmail(''); setMemberRequiresPasswordSetup(false); }}
+        requiresPasswordSetup={memberRequiresPasswordSetup}
+        onClearPasswordSetup={() => setMemberRequiresPasswordSetup(false)}
         onOpenAI={() => setIsAIOpen(true)}
         resetRequests={resetRequests}
         onClearRequest={handleClearRequest}
@@ -115,9 +118,10 @@ const App: React.FC = () => {
             onOpenAI={() => setIsAIOpen(true)} 
             logo={adminLogo}
             userRole={userRole}
-            onLogin={(role, email) => {
+            onLogin={(role, email, requiresPasswordSetup) => {
               setUserRole(role);
-              if (email) setCurrentUserEmail(email);
+              if (email) setCurrentUserEmail(email.trim().toUpperCase());
+              setMemberRequiresPasswordSetup(!!requiresPasswordSetup);
               setView('dashboard');
             }}
             onResetRequest={handleResetRequest}
@@ -160,9 +164,10 @@ const App: React.FC = () => {
                 onOpenAI={() => setIsAIOpen(true)} 
                 logo={adminLogo}
                 userRole={userRole}
-                onLogin={(role, email) => {
+                onLogin={(role, email, requiresPasswordSetup) => {
                     setUserRole(role);
-                    if (email) setCurrentUserEmail(email);
+                    if (email) setCurrentUserEmail(email.trim().toUpperCase());
+                    setMemberRequiresPasswordSetup(!!requiresPasswordSetup);
                     setView('dashboard');
                 }}
                 onResetRequest={handleResetRequest}
@@ -238,9 +243,10 @@ const App: React.FC = () => {
         onOpenAI={() => setIsAIOpen(true)} 
         logo={adminLogo}
         userRole={userRole}
-        onLogin={(role, email) => {
+        onLogin={(role, email, requiresPasswordSetup) => {
           setUserRole(role);
-          if (email) setCurrentUserEmail(email);
+          if (email) setCurrentUserEmail(email.trim().toUpperCase());
+          setMemberRequiresPasswordSetup(!!requiresPasswordSetup);
           setView('dashboard');
         }}
         onResetRequest={handleResetRequest}

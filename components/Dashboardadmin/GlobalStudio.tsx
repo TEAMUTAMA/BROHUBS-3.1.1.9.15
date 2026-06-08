@@ -8,8 +8,8 @@ import PanelControlMonitor from '../PanelControlMonitor';
 import { LayoutTemplate, Monitor, Settings2, ChevronDown, Gamepad2, Palette, Layers, Eye, EyeOff, Play, Square, Keyboard, Radio, Copy, Check, ExternalLink, HelpCircle, Info, X, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSharedState } from '../../lib/useSharedState';
-import { getProgramLayersKey } from '../../lib/programLayers';
-import { notifyCompanionTrigger } from '../../lib/companionProgram';
+import { getProgramLayersKey, getPreviewAssetKey, companionScopeMatches } from '../../lib/programLayers';
+import { notifyCompanionTrigger, type CompanionTriggerPayload } from '../../lib/companionProgram';
 
 interface GlobalStudioProps {
   games: Game[];
@@ -21,10 +21,14 @@ interface GlobalStudioProps {
 }
 
 const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, globalLogo, project, onBack }) => {
+  const companionProjectScope = project?.id ?? null;
   const [selectedGameId, setSelectedGameId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_GAME_ID', games[0]?.id || '');
   const [selectedThemeId, setSelectedThemeId] = useSharedState<string>('BROHUBS_STUDIO_SELECTED_THEME_ID', '');
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
-  const [previewAssetId, setPreviewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
+  const [previewAssetId, setPreviewAssetId] = useSharedState<string | null>(
+    getPreviewAssetKey(companionProjectScope),
+    null
+  );
   const [programLayers, setProgramLayers] = useSharedState<Record<number, string | null>>(
     getProgramLayersKey(project?.id),
     { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null }
@@ -69,6 +73,9 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     let url = `${base}/api/companion/trigger?assetId=${assetId}&action=${action}`;
     if (layer !== undefined) {
       url += `&layer=${layer}`;
+    }
+    if (companionProjectScope) {
+      url += `&projectScope=${encodeURIComponent(companionProjectScope)}`;
     }
     return url;
   };
@@ -204,7 +211,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           });
           return newLayers;
         });
-        notifyCompanionTrigger(assetId, 'stop');
+        notifyCompanionTrigger(assetId, 'stop', undefined, companionProjectScope);
       } else {
         // Status 0 or 1 -> Status 2 (PROGRAM)
         setPreviewAssetId(null); // Ensure it's not in preview anymore
@@ -218,7 +225,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           newLayers[selectedLayer] = assetId;
           return newLayers;
         });
-        notifyCompanionTrigger(assetId, 'play', selectedLayer);
+        notifyCompanionTrigger(assetId, 'play', selectedLayer, companionProjectScope);
       }
     } else {
       // If no layer is selected, we only manage PREVIEW status
@@ -236,19 +243,19 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             });
             return newLayers;
           });
-          notifyCompanionTrigger(assetId, 'stop');
+          notifyCompanionTrigger(assetId, 'stop', undefined, companionProjectScope);
         }
         setPreviewFeedKey((k) => k + 1);
         setPreviewAssetId(assetId);
       }
     }
-  }, [programLayers, previewAssetId, bumpProgramLayerPlayKey]);
+  }, [programLayers, previewAssetId, bumpProgramLayerPlayKey, companionProjectScope]);
 
   const getAssetStatus = useCallback((assetId: string) => {
     if (Object.values(programLayers).includes(assetId)) return 2; // PROGRAM
     if (previewAssetId === assetId) return 1; // PREVIEW
     return 0; // OFF
-  }, [programLayers, previewAssetId]);
+  }, [programLayers, previewAssetId, companionProjectScope]);
 
   // Bind keydown events for quick play/stop activation or custom hotkey routing
   useEffect(() => {
@@ -346,7 +353,9 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
   }, [listeningAssetId, hotkeys, filteredAssets, handlePlayAsset]);
 
   // Trigger handler for external stream/companion triggers
-  const handleCompanionTrigger = useCallback((payload: { assetId: string, action: string, layer?: number }) => {
+  const handleCompanionTrigger = useCallback((payload: CompanionTriggerPayload) => {
+    if (!companionScopeMatches(payload.projectScope, companionProjectScope)) return;
+
     const { assetId, action, layer } = payload;
     
     // Check if the asset exists (case-insensitive)
@@ -407,7 +416,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
         handlePlayAsset(resolvedAssetId);
       }
     }
-  }, [programLayers, previewAssetId, handlePlayAsset, bumpProgramLayerPlayKey]);
+  }, [programLayers, previewAssetId, handlePlayAsset, bumpProgramLayerPlayKey, companionProjectScope]);
 
   // Keep a ref of the trigger callback to avoid reconnecting SSE on every state change
   const handleCompanionTriggerRef = useRef(handleCompanionTrigger);
@@ -415,9 +424,9 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     handleCompanionTriggerRef.current = handleCompanionTrigger;
   }, [handleCompanionTrigger]);
 
-  // Connect to live EventSource for Real-time Companion Actions
+  // Connect to live EventSource for Real-time Companion Actions (Member broadcast only)
   useEffect(() => {
-    if (!companionEnabled) {
+    if (!companionEnabled || !companionProjectScope) {
       setSseConnected(false);
       return;
     }
@@ -454,7 +463,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       sse?.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
-  }, [companionEnabled]);
+  }, [companionEnabled, companionProjectScope]);
 
   const isLive = useMemo(
     () => Object.values(programLayers).some((assetId) => assetId !== null),
@@ -498,6 +507,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             onBack={handleBack}
             globalLogo={globalLogo}
             projectPlayers={project?.players || []}
+            companionProjectScope={companionProjectScope}
             isGlobalStudio={true}
             {...monitorFeedProps}
           />
@@ -516,6 +526,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             onBack={handleBack}
             globalLogo={globalLogo}
             projectPlayers={project?.players || []}
+            companionProjectScope={companionProjectScope}
             isGlobalStudio={true}
             {...monitorFeedProps}
           />
@@ -534,6 +545,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             onBack={handleBack}
             globalLogo={globalLogo}
             projectPlayers={project?.players || []}
+            companionProjectScope={companionProjectScope}
             isGlobalStudio={true}
             {...monitorFeedProps}
           />
@@ -541,7 +553,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       }
     }
     return null;
-  }, [themes, selectedThemeId, games, userRole, globalLogo, project?.players, handleBack]);
+  }, [themes, selectedThemeId, games, userRole, globalLogo, project?.players, handleBack, companionProjectScope]);
 
   const programLayerList = useMemo(
     () =>
@@ -627,6 +639,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               onBack={handleBack}
               globalLogo={globalLogo}
               projectPlayers={project?.players || []}
+              companionProjectScope={companionProjectScope}
               isGlobalStudio={true}
               showMonitorProp={false}
               programAssetIdProp={Object.values(programLayers).includes(activeAsset.id) ? activeAsset.id : null}
@@ -647,6 +660,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               onBack={handleBack}
               globalLogo={globalLogo}
               projectPlayers={project?.players || []}
+              companionProjectScope={companionProjectScope}
               isGlobalStudio={true}
               showMonitorProp={false}
               programAssetIdProp={Object.values(programLayers).includes(activeAsset.id) ? activeAsset.id : null}
@@ -667,6 +681,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               onBack={handleBack}
               globalLogo={globalLogo}
               projectPlayers={project?.players || []}
+              companionProjectScope={companionProjectScope}
               isGlobalStudio={true}
               showMonitorProp={false}
               programAssetIdProp={Object.values(programLayers).includes(activeAsset.id) ? activeAsset.id : null}

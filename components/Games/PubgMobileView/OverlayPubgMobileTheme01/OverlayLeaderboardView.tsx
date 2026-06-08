@@ -287,6 +287,7 @@ interface OverlayLeaderboardViewProps {
   onSelectAsset?: (asset: Asset) => void;
   globalLogo?: string | null;
   projectPlayers?: PlayerData[];
+  companionProjectScope?: string | null;
   isGlobalStudio?: boolean;
   showMonitorProp?: boolean;
   programAssetIdProp?: string | null;
@@ -721,10 +722,14 @@ const INITIAL_VISUAL_CONFIG: VisualConfig = {
 };
 
 const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({ 
-  asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], isGlobalStudio = false, showMonitorProp = true,
+  asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], companionProjectScope = null, isGlobalStudio = false, showMonitorProp = true,
   programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, style
 }) => {
   useOverlayFonts();
+  const syncCompanionData = (payload: Parameters<typeof notifyCompanionData>[0]) =>
+    notifyCompanionData(payload, companionProjectScope);
+  const syncCompanionAnimation = (payload: Parameters<typeof notifyCompanionAnimation>[0]) =>
+    notifyCompanionAnimation(payload, companionProjectScope);
   const [configTab, setConfigTab] = useState<'DATA' | 'VISUAL' | 'ANIMATION'>('DATA');
   const [visualSettingsPanel, setVisualSettingsPanel] = useState<
     'choose' | 'leaderboard' | 'elimination' | 'finalFour'
@@ -1055,7 +1060,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   // Push transition settings to OBS / output links (separate browser storage)
   useEffect(() => {
     if (visualOnly) return;
-    notifyCompanionAnimation({
+    syncCompanionAnimation({
       assetId: asset.id,
       animation: effectiveAnimationConfig,
       presetOverrides,
@@ -1225,7 +1230,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const pushEliminationToCompanion = useCallback(
     (alert: TeamEliminationAlert | null) => {
       if (visualOnly) return;
-      notifyCompanionData({
+      syncCompanionData({
         assetId: asset.id,
         data: { [TEAM_ELIMINATION_ALERT_KEY]: alert },
       });
@@ -1335,7 +1340,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       frozenStagedElimAlert ??
       (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
       STAGED_ELIM_PREVIEW_FALLBACK;
-    notifyCompanionData({
+    syncCompanionData({
       assetId: asset.id,
       data: {
         BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
@@ -1426,7 +1431,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
         setElimBannerHoldPreview(true);
         if (!visualOnly) {
           pushEliminationToCompanion(stagedAlert);
-          notifyCompanionData({
+          syncCompanionData({
             assetId: asset.id,
             data: {
               BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
@@ -1779,7 +1784,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   const pushCompanionTeamsNow = useCallback(
     (teamsSnapshot: Team[]) => {
       if (visualOnly) return;
-      notifyCompanionData({
+      syncCompanionData({
         assetId: asset.id,
         data: {
           BROHUBS_LEADERBOARD_TEAMS: teamsSnapshot.map((team) =>
@@ -1980,7 +1985,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   useEffect(() => {
     if (visualOnly || elimBannerHoldPreview || finalFourHoldPreview) return;
     const timer = setTimeout(() => {
-      notifyCompanionData({
+      syncCompanionData({
         assetId: asset.id,
         data: {
           BROHUBS_LEADERBOARD_TEAMS: teamsRef.current.map((team) =>
@@ -2018,7 +2023,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
   useEffect(() => {
     if (visualOnly || !finalFourHoldPreview) return;
     const timer = setTimeout(() => {
-      notifyCompanionData({
+      syncCompanionData({
         assetId: asset.id,
         data: {
           BROHUBS_LEADERBOARD_VISUAL: visualConfig,
@@ -2037,7 +2042,7 @@ const OverlayLeaderboardView: React.FC<OverlayLeaderboardViewProps> = ({
       (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
       STAGED_ELIM_PREVIEW_FALLBACK;
     const timer = setTimeout(() => {
-      notifyCompanionData({
+      syncCompanionData({
         assetId: asset.id,
         data: {
           BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,

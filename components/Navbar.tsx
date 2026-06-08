@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface NavbarProps {
   onOpenAI: () => void;
-  onLogin: (role: 'admin' | 'member', email?: string) => void;
+  onLogin: (role: 'admin' | 'member', email?: string, requiresPasswordSetup?: boolean) => void;
   logo: string | null;
   userRole: 'admin' | 'member';
   onResetRequest: (email: string) => void;
@@ -56,10 +56,14 @@ const Navbar: React.FC<NavbarProps> = ({
     setIsLoggingIn(true);
     
     try {
-        const role = await loginUser(username, password);
+        const result = await loginUser(username, password);
         
-        if (role) {
-            onLogin(role, username);
+        if (result) {
+            onLogin(
+              result.role,
+              result.role === 'member' ? result.memberEmail : username,
+              result.role === 'member' ? result.requiresPasswordSetup : false
+            );
             handleClose();
         } else {
             setLoginError('ACCESS DENIED: INVALID CREDENTIALS');
@@ -284,7 +288,7 @@ const Navbar: React.FC<NavbarProps> = ({
                     <div className="space-y-4">
                     <div className="space-y-1">
                         <label className="text-[9px] font-black text-gray-500 tracking-[0.2em] uppercase ml-2">
-                        USER / EMAIL
+                        EMAIL ATAU NAMA USER
                         </label>
                         <div className="relative">
                         <input 
@@ -292,8 +296,8 @@ const Navbar: React.FC<NavbarProps> = ({
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             disabled={isLoggingIn}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pl-10 text-sm text-white placeholder:text-gray-700 focus:border-[#ccff00]/50 outline-none transition-all uppercase disabled:opacity-50"
-                            placeholder="ENTER ID"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pl-10 text-sm text-white placeholder:text-gray-700 focus:border-[#ccff00]/50 outline-none transition-all disabled:opacity-50"
+                            placeholder="ADI atau ADI@GMAIL.COM"
                         />
                         <User size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" />
                         </div>

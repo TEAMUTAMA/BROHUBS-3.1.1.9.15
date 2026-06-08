@@ -128,7 +128,9 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       package: formData.package,
       initial: formData.name.charAt(0).toUpperCase(),
       expiryDate: expiryISO,
-      resetStatus: 'IDLE'
+      resetStatus: 'CONFIRMED',
+      tempPassword: newPassword,
+      needsNewPassword: true,
     };
 
     setMembers(prev => [...prev, newMember]);
@@ -162,7 +164,8 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                   isExpired: false,
                   extensionPending: false,
                   requestedPackage: undefined, // Clear request
-                  tempPassword: newPass // Set new password
+                  tempPassword: newPass,
+                  needsNewPassword: true,
               };
           }
           return m;
@@ -585,21 +588,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                                     onClick={() => {
                                         navigator.clipboard.writeText(member.tempPassword || '');
                                         setCopyFeedback(`${member.email}-pass`);
-                                        
-                                        // AUTO-LOCK LOGIC: Clear password & reset status after 2 seconds
-                                        setTimeout(() => {
-                                            setCopyFeedback(null);
-                                            setMembers(prev => prev.map(m => {
-                                                if (m.email === member.email) {
-                                                    return { 
-                                                        ...m, 
-                                                        tempPassword: undefined, // Hide the password
-                                                        resetStatus: 'IDLE' // Return to clean state
-                                                    };
-                                                }
-                                                return m;
-                                            }));
-                                        }, 2000);
+                                        setTimeout(() => setCopyFeedback(null), 2000);
                                     }}
                                     className={`flex-1 md:flex-none px-3 py-3 md:py-2 text-[9px] font-black border rounded-lg transition-all tracking-widest uppercase flex items-center justify-center gap-2 ${
                                         copyFeedback === `${member.email}-pass`
@@ -609,7 +598,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                                     title="Copy System Password"
                                     >
                                     {copyFeedback === `${member.email}-pass` ? <Check size={12} /> : <Key size={12} />}
-                                    {copyFeedback === `${member.email}-pass` ? 'COPIED' : 'COPY ACCESS'}
+                                    {copyFeedback === `${member.email}-pass` ? 'COPIED' : 'COPY KODE'}
                                     </button>
                                 ) : isPendingApproval ? (
                                     <button 
@@ -918,7 +907,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
               Registration Complete
             </h2>
             <p className="text-[10px] font-black text-gray-500 tracking-[0.2em] uppercase mb-6">
-              System Generated Security Key
+              Kode Verifikasi Member (sekali pakai)
             </p>
 
             <div className="w-full space-y-4">
@@ -932,7 +921,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                </div>
                
                <p className="text-[9px] text-gray-600 font-medium">
-                 Copy this password now. For security reasons, it cannot be retrieved later.
+                 Kirim kode ini ke member. Dipakai untuk verifikasi sebelum member membuat password login sendiri.
                </p>
 
                <div className="grid grid-cols-1 gap-3 mt-4">
@@ -952,7 +941,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       </>
                     ) : (
                       <>
-                        <Copy size={14} /> COPY PASSWORD
+                        <Copy size={14} /> COPY KODE VERIFIKASI
                       </>
                     )}
                   </button>

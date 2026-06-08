@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ASSET_DATABASE } from '../../constants/assets';
 import { useSharedState } from '../../lib/useSharedState';
-import { getProgramLayersKey } from '../../lib/programLayers';
+import { getProgramLayersKey, getPreviewAssetKey } from '../../lib/programLayers';
 
 // ============================================================================
 // SELF-CONTAINED TYPES: Decoupled for easy copying to other applications
@@ -77,7 +77,10 @@ interface MasterOutputViewProps {
 }
 
 const AssetStatusBadge: React.FC<{ asset: Asset; project: Project | undefined }> = ({ asset, project }) => {
-  const [previewAssetId] = useSharedState<string | null>('BROHUBS_STUDIO_PREVIEW_ASSET', null);
+  const [previewAssetId] = useSharedState<string | null>(
+    getPreviewAssetKey(project?.id),
+    null
+  );
   const [programLayers] = useSharedState<Record<number, string | null>>(
     getProgramLayersKey(project?.id),
     { 1: null, 2: null, 3: null, 4: null, 5: null }

@@ -7,18 +7,21 @@ export interface CompanionTriggerPayload {
   assetId: string;
   action?: CompanionAction;
   layer?: number;
+  projectScope?: string;
 }
 
 export async function notifyCompanionTrigger(
   assetId: string,
   action: CompanionAction,
-  layer?: number
+  layer?: number,
+  projectScope?: string | null
 ): Promise<void> {
+  if (!projectScope) return;
   try {
     await fetch('/api/companion/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assetId, action, layer }),
+      body: JSON.stringify({ assetId, action, layer, projectScope }),
     });
   } catch (err) {
     console.warn('Companion trigger broadcast failed:', err);

@@ -13,7 +13,7 @@ async function startServer() {
   // Latest animation config per asset (synced to OBS / output links)
   const animationState: Record<
     string,
-    { animation: unknown; presetOverrides?: unknown }
+    { animation: unknown; presetOverrides?: unknown; projectScope?: string }
   > = {};
 
   const broadcastAnimation = (payload: object) => {
@@ -31,7 +31,7 @@ async function startServer() {
   };
 
   // Latest overlay data per asset (teams, players, layout, etc.)
-  const dataState: Record<string, Record<string, unknown>> = {};
+  const dataState: Record<string, { data: Record<string, unknown>; projectScope?: string }> = {};
 
   const broadcastData = (payload: object) => {
     const line = JSON.stringify(payload);
@@ -41,8 +41,12 @@ async function startServer() {
   };
 
   const replayDataState = (client: any) => {
-    Object.entries(dataState).forEach(([assetId, data]) => {
-      const payload = JSON.stringify({ assetId, data });
+    Object.entries(dataState).forEach(([assetId, entry]) => {
+      const payload = JSON.stringify({
+        assetId,
+        data: entry.data,
+        projectScope: entry.projectScope,
+      });
       client.write(`event: data\ndata: ${payload}\n\n`);
     });
   };
@@ -74,17 +78,17 @@ async function startServer() {
 
   // API Route to register Companion action / trigger
   app.get("/api/companion/trigger", (req, res) => {
-    const { assetId, action, layer } = req.query;
+    const { assetId, action, layer, projectScope } = req.query;
 
     if (!assetId) {
       return res.status(400).json({ error: "Missing assetId" });
     }
 
-    // Broadcast trigger payload to all active SSE clients
     const payload = JSON.stringify({
       assetId,
-      action: action || "toggle", // 'play', 'stop', 'toggle'
+      action: action || "toggle",
       layer: layer ? parseInt(layer as string, 10) : undefined,
+      projectScope: typeof projectScope === "string" ? projectScope : undefined,
     });
 
     sseClients.forEach((client) => {
@@ -94,13 +98,13 @@ async function startServer() {
     return res.json({
       success: true,
       message: `Trigger sent to ${sseClients.length} active broadcast overlays/dashboards.`,
-      payload: { assetId, action, layer },
+      payload: { assetId, action, layer, projectScope },
     });
   });
 
   // Supporting POST method too for modular controls
   app.post("/api/companion/trigger", express.json(), (req, res) => {
-    const { assetId, action, layer } = req.body;
+    const { assetId, action, layer, projectScope } = req.body;
 
     if (!assetId) {
       return res.status(400).json({ error: "Missing assetId" });
@@ -110,6 +114,7 @@ async function startServer() {
       assetId,
       action: action || "toggle",
       layer: layer ? parseInt(layer, 10) : undefined,
+      projectScope: typeof projectScope === "string" ? projectScope : undefined,
     });
 
     sseClients.forEach((client) => {
@@ -124,14 +129,14 @@ async function startServer() {
   });
 
   app.post("/api/companion/animation", express.json(), (req, res) => {
-    const { assetId, animation, presetOverrides } = req.body;
+    const { assetId, animation, presetOverrides, projectScope } = req.body;
 
     if (!assetId || !animation) {
       return res.status(400).json({ error: "Missing assetId or animation" });
     }
 
-    animationState[assetId] = { animation, presetOverrides };
-    broadcastAnimation({ assetId, animation, presetOverrides });
+    animationState[assetId] = { animation, presetOverrides, projectScope };
+    broadcastAnimation({ assetId, animation, presetOverrides, projectScope });
 
     return res.json({
       success: true,
@@ -141,14 +146,22 @@ async function startServer() {
   });
 
   app.post("/api/companion/data", express.json(), (req, res) => {
-    const { assetId, data } = req.body;
+    const { assetId, data, projectScope } = req.body;
 
     if (!assetId || !data || typeof data !== "object") {
       return res.status(400).json({ error: "Missing assetId or data object" });
     }
 
-    dataState[assetId] = { ...(dataState[assetId] || {}), ...data };
-    broadcastData({ assetId, data: dataState[assetId] });
+    const prev = dataState[assetId]?.data ?? {};
+    dataState[assetId] = {
+      data: { ...prev, ...data },
+      projectScope: typeof projectScope === "string" ? projectScope : dataState[assetId]?.projectScope,
+    };
+    broadcastData({
+      assetId,
+      data: dataState[assetId].data,
+      projectScope: dataState[assetId].projectScope,
+    });
 
     return res.json({
       success: true,
