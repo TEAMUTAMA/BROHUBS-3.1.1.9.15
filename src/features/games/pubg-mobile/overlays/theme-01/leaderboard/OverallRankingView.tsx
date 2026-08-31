@@ -1073,6 +1073,40 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const [matchTitle, setMatchTitle] = useSharedState('BROHUBS_LEADERBOARD_TITLE', 'OVERALL RANKING');
   const [currentMatch, setCurrentMatch] = useSharedState('BROHUBS_LEADERBOARD_MATCH', 1);
   const [nextPlacementRank, setNextPlacementRank] = useState(16);
+  const [isTelemetryDemoSending, setIsTelemetryDemoSending] = useState(false);
+  const [telemetryDemoStatus, setTelemetryDemoStatus] = useState<string | null>(null);
+
+  // Telemetry producer → operator control desk. Output links receive the same
+  // snapshot through useCompanionOutputSync's existing `data` event handler.
+  useEffect(() => {
+    if (visualOnly || !companionProjectScope) return;
+
+    const sse = new EventSource('/api/companion/stream');
+    const handleTelemetry = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          projectScope?: string;
+          teams?: unknown;
+          currentMatch?: unknown;
+          title?: unknown;
+        };
+        if (payload.projectScope !== companionProjectScope || !Array.isArray(payload.teams)) return;
+        setTeams(payload.teams as Team[]);
+        if (typeof payload.currentMatch === 'number' && Number.isInteger(payload.currentMatch)) {
+          setCurrentMatch(payload.currentMatch);
+        }
+        if (typeof payload.title === 'string') setMatchTitle(payload.title);
+      } catch (error) {
+        console.error('PUBG telemetry payload error:', error);
+      }
+    };
+
+    sse.addEventListener('pubg-telemetry', handleTelemetry as EventListener);
+    return () => {
+      sse.removeEventListener('pubg-telemetry', handleTelemetry as EventListener);
+      sse.close();
+    };
+  }, [companionProjectScope, setCurrentMatch, setMatchTitle, setTeams, visualOnly]);
 
   const [activePopups, setActivePopups] = useState<number[]>([]);
   const [eliminationAlert, setEliminationAlert] = useSharedState<TeamEliminationAlert | null>(
@@ -1112,6 +1146,60 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const matchKillRules: MatchKillRules =
     matchKillRulesByMatch[String(currentMatch)] ?? DEFAULT_MATCH_KILL_RULES;
+
+  const runTelemetryDemo = async () => {
+    const nextTeams = teams.map((team, index) => {
+      const playerCount = Math.max(team.playerKills.length, team.status.length, 4);
+      const addedKills = (currentMatch + index * 2) % 4;
+      const playerKills = Array.from({ length: playerCount }, (_, playerIndex) =>
+        (team.playerKills[playerIndex] ?? 0) + (playerIndex === index % playerCount ? addedKills : 0)
+      );
+      const alivePlayers = Math.max(1, playerCount - ((currentMatch + index) % 3));
+      const status = Array.from({ length: playerCount }, (_, playerIndex) =>
+        playerIndex < alivePlayers ? 1 : 0
+      );
+      return {
+        ...team,
+        rank: index + 1,
+        playerKills,
+        status,
+        points: team.points + addedKills,
+        totalPlacementPoints: team.totalPlacementPoints + (index === 0 ? 1 : 0),
+        active: true,
+        placementRank: null,
+      };
+    });
+
+    if (!companionProjectScope) {
+      setTeams(nextTeams);
+      setTelemetryDemoStatus('SIMULASI LOKAL DITERAPKAN');
+      return;
+    }
+
+    setIsTelemetryDemoSending(true);
+    setTelemetryDemoStatus(null);
+    try {
+      const response = await fetch('/api/telemetry/pubg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectScope: companionProjectScope,
+          title: matchTitle,
+          currentMatch,
+          teams: nextTeams,
+        }),
+      });
+      if (!response.ok) throw new Error(`Telemetry rejected (${response.status})`);
+      // Terapkan juga secara lokal agar operator melihat hasil tanpa menunggu SSE round-trip.
+      setTeams(nextTeams);
+      setTelemetryDemoStatus('SIMULASI TERKIRIM KE OUTPUT');
+    } catch (error) {
+      console.error('PUBG telemetry demo failed:', error);
+      setTelemetryDemoStatus('SIMULASI GAGAL TERKIRIM');
+    } finally {
+      setIsTelemetryDemoSending(false);
+    }
+  };
 
   const [isDbSelectorOpen, setIsDbSelectorOpen] = useState<{ rankIndex: number } | null>(null);
   const [dbSearch, setDbSearch] = useState('');
@@ -4227,6 +4315,26 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                         </div>
                                         <button onClick={() => isMatchReadyToEnd && startNewMatch(currentMatch + 1)} className={`w-8 h-full flex items-center justify-center transition-all ${isMatchReadyToEnd ? 'text-zinc-600 hover:text-white' : 'text-zinc-800 cursor-not-allowed opacity-50'}`}><Plus size={14} /></button>
                                     </div>
+                                </div>
+
+                                {/* TELEMETRY DEMO */}
+                                <div className="bg-[#071419] border border-cyan-400/20 rounded-[20px] p-3 flex flex-col items-center justify-between flex-1 min-w-[170px] h-24 shadow-xl">
+                                    <div className="flex items-center gap-1.5">
+                                        <Activity size={10} className="text-cyan-300" />
+                                        <h3 className="text-[8px] font-black text-cyan-200/60 tracking-[0.2em] uppercase">Telemetry Demo</h3>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={runTelemetryDemo}
+                                        disabled={isTelemetryDemoSending || teams.length === 0}
+                                        className="w-full h-10 rounded-xl bg-cyan-400 text-black hover:bg-cyan-200 disabled:bg-cyan-950 disabled:text-cyan-500 font-black text-[8px] tracking-[0.16em] uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
+                                    >
+                                        {isTelemetryDemoSending ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} fill="currentColor" />}
+                                        {isTelemetryDemoSending ? 'MENGIRIM...' : 'KIRIM SIMULASI'}
+                                    </button>
+                                    <span className="h-2 text-[6px] font-black tracking-wider text-cyan-200/60 uppercase">
+                                        {telemetryDemoStatus ?? 'SNAPSHOT SKOR CONTOH'}
+                                    </span>
                                 </div>
 
                                 {/* STATUS & END MATCH */}

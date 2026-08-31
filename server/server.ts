@@ -118,8 +118,9 @@ async function startServer() {
     });
   };
 
-  // Latest overlay data per asset (teams, players, layout, etc.)
-  const dataState: Record<string, { data: Record<string, unknown>; projectScope?: string }> = {};
+  // Latest overlay data per project and asset. Like program and animation state,
+  // telemetry must never leak between two concurrently running projects.
+  const dataState: Record<string, Record<string, { data: Record<string, unknown> }>> = {};
 
   const broadcastData = (payload: object) => {
     const line = JSON.stringify(payload);
@@ -129,13 +130,15 @@ async function startServer() {
   };
 
   const replayDataState = (client: any) => {
-    Object.entries(dataState).forEach(([assetId, entry]) => {
-      const payload = JSON.stringify({
-        assetId,
-        data: entry.data,
-        projectScope: entry.projectScope,
+    Object.entries(dataState).forEach(([projectScope, assets]) => {
+      Object.entries(assets).forEach(([assetId, entry]) => {
+        const payload = JSON.stringify({
+          assetId,
+          data: entry.data,
+          projectScope,
+        });
+        client.write(`event: data\ndata: ${payload}\n\n`);
       });
-      client.write(`event: data\ndata: ${payload}\n\n`);
     });
   };
 
@@ -259,21 +262,76 @@ async function startServer() {
       return res.status(400).json({ error: "Missing assetId or data object" });
     }
 
-    const prev = dataState[assetId]?.data ?? {};
-    dataState[assetId] = {
+    const scope = normalizeScope(projectScope);
+    dataState[scope] ??= {};
+    const prev = dataState[scope][assetId]?.data ?? {};
+    dataState[scope][assetId] = {
       data: { ...prev, ...data },
-      projectScope: typeof projectScope === "string" ? projectScope : dataState[assetId]?.projectScope,
     };
     broadcastData({
       assetId,
-      data: dataState[assetId].data,
-      projectScope: dataState[assetId].projectScope,
+      data: dataState[scope][assetId].data,
+      projectScope: scope,
     });
 
     return res.json({
       success: true,
       message: `Overlay data synced to ${sseClients.length} output client(s).`,
       assetId,
+    });
+  });
+
+  /**
+   * PUBG telemetry ingestion (demo phase).
+   *
+   * A producer can post a complete current leaderboard snapshot. The server
+   * validates its envelope, publishes it to the control desk, and mirrors it
+   * into the existing companion data channel used by OBS/vMix output links.
+   */
+  app.post("/api/telemetry/pubg", companionJson, (req, res) => {
+    const { projectScope, teams, currentMatch, title } = req.body;
+    if (!Array.isArray(teams) || teams.length < 1 || teams.length > 16) {
+      return res.status(400).json({ error: "teams must contain between 1 and 16 leaderboard entries" });
+    }
+    if (
+      teams.some(
+        (team) =>
+          !team ||
+          typeof team !== "object" ||
+          typeof team.team !== "string" ||
+          !team.team.trim() ||
+          !Number.isFinite(Number(team.rank)) ||
+          Number(team.rank) < 1
+      )
+    ) {
+      return res.status(400).json({ error: "every team requires a name and positive rank" });
+    }
+    if (currentMatch !== undefined && (!Number.isInteger(currentMatch) || currentMatch < 1)) {
+      return res.status(400).json({ error: "currentMatch must be a positive integer" });
+    }
+    if (title !== undefined && (typeof title !== "string" || title.length > 120)) {
+      return res.status(400).json({ error: "title must be a string up to 120 characters" });
+    }
+
+    const scope = normalizeScope(projectScope);
+    const data: Record<string, unknown> = { BROHUBS_LEADERBOARD_TEAMS: teams };
+    if (currentMatch !== undefined) data.BROHUBS_LEADERBOARD_MATCH = currentMatch;
+    if (title !== undefined) data.BROHUBS_LEADERBOARD_TITLE = title;
+
+    dataState[scope] ??= {};
+    const previous = dataState[scope]["pmgc-leaderboard"]?.data ?? {};
+    dataState[scope]["pmgc-leaderboard"] = { data: { ...previous, ...data } };
+
+    const payload = { assetId: "pmgc-leaderboard", data: dataState[scope]["pmgc-leaderboard"].data, projectScope: scope };
+    broadcastData(payload);
+    const telemetry = JSON.stringify({ teams, currentMatch, title, projectScope: scope });
+    sseClients.forEach((client) => client.write(`event: pubg-telemetry\ndata: ${telemetry}\n\n`));
+
+    return res.status(202).json({
+      accepted: true,
+      projectScope: scope,
+      teams: teams.length,
+      connectedClients: sseClients.length,
     });
   });
 
