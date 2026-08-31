@@ -1,0 +1,14 @@
+---
+description: Selesaikan satu pekerjaan aktif sebelum berpindah ke Waiting List
+alwaysApply: true
+---
+
+# Working Flow — Waiting List
+
+Ikuti `WORKFLOW.md` untuk setiap pekerjaan BROHUBS.
+
+- Hanya satu pekerjaan boleh aktif dalam satu waktu.
+- Selesaikan implementasi dan validasi pekerjaan aktif sebelum memulai pekerjaan lain.
+- Ide, bug, dan permintaan lain masuk ke Waiting List; jangan dikerjakan langsung di tengah task aktif.
+- Jika ada hal yang tampak kritis atau lebih prioritas, jelaskan dampaknya dan minta persetujuan user sebelum mengganti urutan.
+- Setelah task selesai, jangan otomatis memulai item berikutnya tanpa instruksi user.
