@@ -309,34 +309,43 @@ import {
 } from '@/features/games/pubg-mobile/logic/finalFourOverlayVisual';
 import {
   DEFAULT_TERMINATOR_VISUAL,
-  TERMINATOR_DESIGN_PRESETS,
   TERMINATOR_CONFIG_KEY,
   TERMINATOR_COLOR_KEYS,
   TERMINATOR_COLOR_LABELS,
   TERMINATOR_PLAYER_KILL_HISTORY_KEY,
-  applyTerminatorDesignPreset,
+  TERMINATOR_VISUAL_PRESETS,
   clampTerminatorDisplaySeconds,
   clampTerminatorKillThreshold,
   clampTerminatorPlayerImageScale,
   clampTerminatorPosition,
   clampTerminatorScale,
-  getTerminatorDesignPreset,
-  migrateTerminatorPlayerImageDefaults,
+  terminatorDesignBaseline,
   terminatorPlayerKey,
-  type TerminatorDesignPresetId,
   type TerminatorPlayerKillHistory,
   type TerminatorVisualConfig,
 } from '@/features/games/pubg-mobile/logic/terminatorVisual';
 import {
+  BROADCAST_CUT_ORIGINAL_PALETTE,
+  BROADCAST_CUT_PALETTE_LABELS,
+  BROADCAST_CUT_LOGO_PANEL_INDICES,
+  BROADCAST_CUT_BAR_INDICES,
+  BROADCAST_CUT_LIGHT_INDICES,
+  BROADCAST_CUT_ACCENT_INDEX,
+  HERO_SPLIT_ORIGINAL_PALETTE,
+  HERO_SPLIT_PANEL_INDICES,
+  HERO_SPLIT_ACCENT_INDEX,
+  HERO_SPLIT_LIGHT_INDICES,
   DEFAULT_FIRST_BLOOD_VISUAL,
   FIRST_BLOOD_ALERT_KEY,
   FIRST_BLOOD_COLOR_KEYS,
   FIRST_BLOOD_COLOR_LABELS,
   FIRST_BLOOD_CONFIG_KEY,
+  FIRST_BLOOD_VISUAL_PRESETS,
   clampFirstBloodDisplaySeconds,
   clampFirstBloodPlayerImageScale,
   clampFirstBloodPosition,
   clampFirstBloodScale,
+  getFirstBloodLayoutBaseline,
   type FirstBloodAlert,
   type FirstBloodTarget,
   type FirstBloodVisualConfig,
@@ -1155,6 +1164,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     TERMINATOR_CONFIG_KEY,
     DEFAULT_TERMINATOR_VISUAL
   );
+  // Baseline "0" slider offset mengikuti design Terminator yang sedang dibuka.
+  const terminatorBaseline = terminatorDesignBaseline(terminatorVisual.designVariant);
   const [firstBloodVisual, setFirstBloodVisual] = useSharedState<FirstBloodVisualConfig>(
     FIRST_BLOOD_CONFIG_KEY,
     DEFAULT_FIRST_BLOOD_VISUAL
@@ -1179,55 +1190,22 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const terminatorKillSnapshotRef = useRef<Map<string, { kills: number; cumulativeKills: number }>>(new Map());
   const pendingTerminatorTargetsRef = useRef<TerminatorTarget[]>([]);
   const terminatorThreshold = clampTerminatorKillThreshold(terminatorVisual.killThreshold);
-  const terminatorPresetDefaults = useMemo(
-    () => getTerminatorDesignPreset(terminatorVisual.designPreset).config,
-    [terminatorVisual.designPreset]
-  );
 
   useEffect(() => {
-    setTerminatorVisual((prev) =>
-      migrateTerminatorPlayerImageDefaults({ ...DEFAULT_TERMINATOR_VISUAL, ...prev })
-    );
+    setTerminatorVisual((prev) => ({ ...DEFAULT_TERMINATOR_VISUAL, ...prev }));
   }, [setTerminatorVisual]);
 
   useEffect(() => {
     setFirstBloodVisual((prev) => {
       const merged = { ...DEFAULT_FIRST_BLOOD_VISUAL, ...prev };
-      const usesOldSharedDesign =
-        merged.accentColor === '#ccff00' &&
-        merged.headerBg === '#74a57f' &&
-        merged.bodyBg === '#e8e6df' &&
-        merged.footerBg === '#74a57f' &&
-        merged.textColor === '#000000' &&
-        merged.mutedTextColor === '#4d5650';
-      const migrated = {
-        ...merged,
-        ...(usesOldSharedDesign
-          ? {
-              displaySeconds: DEFAULT_FIRST_BLOOD_VISUAL.displaySeconds,
-              scale: DEFAULT_FIRST_BLOOD_VISUAL.scale,
-              x: DEFAULT_FIRST_BLOOD_VISUAL.x,
-              y: DEFAULT_FIRST_BLOOD_VISUAL.y,
-              playerImageX: DEFAULT_FIRST_BLOOD_VISUAL.playerImageX,
-              playerImageY: DEFAULT_FIRST_BLOOD_VISUAL.playerImageY,
-              playerImageScale: DEFAULT_FIRST_BLOOD_VISUAL.playerImageScale,
-              accentColor: DEFAULT_FIRST_BLOOD_VISUAL.accentColor,
-              headerBg: DEFAULT_FIRST_BLOOD_VISUAL.headerBg,
-              bodyBg: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg,
-              footerBg: DEFAULT_FIRST_BLOOD_VISUAL.footerBg,
-              textColor: DEFAULT_FIRST_BLOOD_VISUAL.textColor,
-              mutedTextColor: DEFAULT_FIRST_BLOOD_VISUAL.mutedTextColor,
-            }
-          : {}),
-      };
       return {
-        ...migrated,
+        ...merged,
         accentColor:
-          migrated.accentColor === '#ff2d2d' ? DEFAULT_FIRST_BLOOD_VISUAL.accentColor : migrated.accentColor,
+          merged.accentColor === '#ff2d2d' ? DEFAULT_FIRST_BLOOD_VISUAL.accentColor : merged.accentColor,
         headerBg:
-          migrated.headerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.headerBg : migrated.headerBg,
+          merged.headerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.headerBg : merged.headerBg,
         footerBg:
-          migrated.footerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.footerBg : migrated.footerBg,
+          merged.footerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.footerBg : merged.footerBg,
       };
     });
   }, [setFirstBloodVisual]);
@@ -1523,16 +1501,79 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     setTerminatorVisual((prev) => ({ ...prev, [key]: value }));
   };
 
-  const applyTerminatorPreset = (presetId: TerminatorDesignPresetId) => {
-    setTerminatorVisual((prev) => applyTerminatorDesignPreset(prev, presetId));
-  };
-
   const patchFirstBloodVisual = <K extends keyof FirstBloodVisualConfig>(
     key: K,
     value: FirstBloodVisualConfig[K]
   ) => {
     setFirstBloodVisual((prev) => ({ ...prev, [key]: value }));
   };
+
+  const resetFirstBloodToPreset = useCallback(() => {
+    setFirstBloodVisual((prev) => {
+      const activePreset = FIRST_BLOOD_VISUAL_PRESETS.find(
+        (p) => p.config.designVariant === prev.designVariant
+      );
+      const base = activePreset
+        ? { ...DEFAULT_FIRST_BLOOD_VISUAL, ...activePreset.config }
+        : DEFAULT_FIRST_BLOOD_VISUAL;
+      return {
+        ...base,
+        enabled: prev.enabled,
+        displaySeconds: prev.displaySeconds,
+        previewHold: false,
+        previewToken: prev.previewToken,
+      };
+    });
+  }, [setFirstBloodVisual]);
+
+  const resetFirstBloodLayout = useCallback(() => {
+    setFirstBloodVisual((prev) => {
+      const activePreset = FIRST_BLOOD_VISUAL_PRESETS.find(
+        (p) => p.config.designVariant === prev.designVariant
+      );
+      const base = activePreset
+        ? { ...DEFAULT_FIRST_BLOOD_VISUAL, ...activePreset.config }
+        : DEFAULT_FIRST_BLOOD_VISUAL;
+      return {
+        ...prev,
+        scale: base.scale,
+        x: base.x,
+        y: base.y,
+        playerImageX: base.playerImageX,
+        playerImageY: base.playerImageY,
+        playerImageScale: base.playerImageScale,
+      };
+    });
+  }, [setFirstBloodVisual]);
+
+  const resetFirstBloodColors = useCallback(() => {
+    setFirstBloodVisual((prev) => {
+      const activePreset = FIRST_BLOOD_VISUAL_PRESETS.find(
+        (p) => p.config.designVariant === prev.designVariant
+      );
+      const base = activePreset
+        ? { ...DEFAULT_FIRST_BLOOD_VISUAL, ...activePreset.config }
+        : DEFAULT_FIRST_BLOOD_VISUAL;
+      return {
+        ...prev,
+        headerBg: base.headerBg,
+        bodyBg: base.bodyBg,
+        footerBg: base.footerBg,
+        accentColor: base.accentColor,
+        textColor: base.textColor,
+        mutedTextColor: base.mutedTextColor,
+        assetPaletteOverride: base.assetPaletteOverride ?? [...BROADCAST_CUT_ORIGINAL_PALETTE],
+      };
+    });
+  }, [setFirstBloodVisual]);
+
+  // Baseline slider per design variant: tiap variant (mis. Hero Split vs
+  // Broadcast Cut) punya "titik nol" sendiri, jadi offset UI baca 0 di default
+  // masing-masing.
+  const firstBloodLayoutBaseline = useMemo(
+    () => getFirstBloodLayoutBaseline(firstBloodVisual.designVariant),
+    [firstBloodVisual.designVariant]
+  );
 
   const previewTerminatorBanner = () => {
     setTerminatorVisual((prev) => ({
@@ -5602,50 +5643,33 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                   </button>
                                 </div>
 
-                                <div className="mb-4 rounded-xl border border-white/10 bg-black p-3">
-                                  <div className="mb-3">
+                                <div className="flex items-center justify-between gap-3 p-3 bg-black border border-white/10 rounded-xl mb-4">
+                                  <div>
                                     <div className="text-[9px] font-black text-white uppercase tracking-widest">
-                                      Default Design
+                                      Total Kill Counter
                                     </div>
                                     <div className="text-[7px] text-zinc-500 normal-case mt-1">
-                                      Pilih template panel bawaan untuk Terminator.
+                                      {terminatorVisual.killCounterSource === 'threshold'
+                                        ? 'Tampilkan target syarat jadi Terminator.'
+                                        : 'Tampilkan total kill gabungan Match 1 → saat ini.'}
                                     </div>
                                   </div>
-                                  <div className="grid grid-cols-3 gap-2">
-                                    {TERMINATOR_DESIGN_PRESETS.map((preset) => {
-                                      const isSelected =
-                                        (terminatorVisual.designPreset ?? DEFAULT_TERMINATOR_VISUAL.designPreset) ===
-                                          preset.id && !terminatorVisual.useCustomBackground;
-
-                                      return (
-                                        <button
-                                          key={preset.id}
-                                          type="button"
-                                          onClick={() => applyTerminatorPreset(preset.id)}
-                                          className={`group min-h-[92px] rounded-xl border p-2 text-left transition-all ${
-                                            isSelected
-                                              ? 'border-[#ccff00] bg-[#ccff00]/10'
-                                              : 'border-white/10 bg-zinc-950 hover:border-white/25'
-                                          }`}
-                                        >
-                                          <div
-                                            className="mb-2 h-8 overflow-hidden rounded-lg border border-white/10"
-                                            style={{
-                                              background: `linear-gradient(110deg, ${preset.swatches[0]} 0%, ${preset.swatches[1]} 58%, ${preset.swatches[2]} 100%)`,
-                                            }}
-                                          >
-                                            <div className="h-full w-1/3 bg-black/25 transition-all group-hover:w-1/2" />
-                                          </div>
-                                          <div className="text-[8px] font-[1000] uppercase tracking-widest text-white">
-                                            {preset.name}
-                                          </div>
-                                          <div className="mt-1 text-[6.5px] font-medium leading-tight text-zinc-500">
-                                            {preset.description}
-                                          </div>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      patchTerminatorVisual(
+                                        'killCounterSource',
+                                        terminatorVisual.killCounterSource === 'threshold' ? 'cumulative' : 'threshold'
+                                      )
+                                    }
+                                    className={`px-4 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all ${
+                                      terminatorVisual.killCounterSource === 'threshold'
+                                        ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                        : 'bg-zinc-950 text-zinc-500 border-white/10 hover:border-white/20'
+                                    }`}
+                                  >
+                                    {terminatorVisual.killCounterSource === 'threshold' ? 'Target' : 'Gabungan'}
+                                  </button>
                                 </div>
 
                                 <div className="grid grid-cols-3 gap-3">
@@ -5680,12 +5704,12 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                     <ScrollableInput
                                       value={
                                         clampTerminatorScale(terminatorVisual.scale) -
-                                        terminatorPresetDefaults.scale
+                                        terminatorBaseline.scale
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'scale',
-                                          clampTerminatorScale(terminatorPresetDefaults.scale + val)
+                                          clampTerminatorScale(terminatorBaseline.scale + val)
                                         )
                                       }
                                       className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white font-black text-center outline-none"
@@ -5699,15 +5723,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampTerminatorPosition(
                                           terminatorVisual.x,
-                                          terminatorPresetDefaults.x
-                                        ) - terminatorPresetDefaults.x
+                                          terminatorBaseline.x
+                                        ) - terminatorBaseline.x
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'x',
                                           clampTerminatorPosition(
-                                            terminatorPresetDefaults.x + val,
-                                            terminatorPresetDefaults.x
+                                            terminatorBaseline.x + val,
+                                            terminatorBaseline.x
                                           )
                                         )
                                       }
@@ -5722,15 +5746,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampTerminatorPosition(
                                           terminatorVisual.y,
-                                          terminatorPresetDefaults.y
-                                        ) - terminatorPresetDefaults.y
+                                          terminatorBaseline.y
+                                        ) - terminatorBaseline.y
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'y',
                                           clampTerminatorPosition(
-                                            terminatorPresetDefaults.y + val,
-                                            terminatorPresetDefaults.y
+                                            terminatorBaseline.y + val,
+                                            terminatorBaseline.y
                                           )
                                         )
                                       }
@@ -5745,15 +5769,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampTerminatorPosition(
                                           terminatorVisual.playerImageX,
-                                          terminatorPresetDefaults.playerImageX
-                                        ) - terminatorPresetDefaults.playerImageX
+                                          terminatorBaseline.playerImageX
+                                        ) - terminatorBaseline.playerImageX
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'playerImageX',
                                           clampTerminatorPosition(
-                                            terminatorPresetDefaults.playerImageX + val,
-                                            terminatorPresetDefaults.playerImageX
+                                            terminatorBaseline.playerImageX + val,
+                                            terminatorBaseline.playerImageX
                                           )
                                         )
                                       }
@@ -5768,15 +5792,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampTerminatorPosition(
                                           terminatorVisual.playerImageY,
-                                          terminatorPresetDefaults.playerImageY
-                                        ) - terminatorPresetDefaults.playerImageY
+                                          terminatorBaseline.playerImageY
+                                        ) - terminatorBaseline.playerImageY
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'playerImageY',
                                           clampTerminatorPosition(
-                                            terminatorPresetDefaults.playerImageY + val,
-                                            terminatorPresetDefaults.playerImageY
+                                            terminatorBaseline.playerImageY + val,
+                                            terminatorBaseline.playerImageY
                                           )
                                         )
                                       }
@@ -5790,13 +5814,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                     <ScrollableInput
                                       value={
                                         clampTerminatorPlayerImageScale(terminatorVisual.playerImageScale) -
-                                        terminatorPresetDefaults.playerImageScale
+                                        terminatorBaseline.playerImageScale
                                       }
                                       onChange={(val) =>
                                         patchTerminatorVisual(
                                           'playerImageScale',
                                           clampTerminatorPlayerImageScale(
-                                            terminatorPresetDefaults.playerImageScale + val
+                                            terminatorBaseline.playerImageScale + val
                                           )
                                         )
                                       }
@@ -5814,6 +5838,67 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       }
                                       className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white font-black uppercase text-center outline-none"
                                     />
+                                  </div>
+                                </div>
+
+                                <div className="mt-5 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    <Palette size={12} className="text-[#ccff00]" />
+                                    Visual Preset
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {TERMINATOR_VISUAL_PRESETS.map((preset) => {
+                                      const selected = Object.entries(preset.config).every(
+                                        ([key, value]) =>
+                                          terminatorVisual[key as keyof TerminatorVisualConfig] === value
+                                      );
+                                      return (
+                                        <button
+                                          key={preset.id}
+                                          type="button"
+                                          onClick={() =>
+                                            setTerminatorVisual((prev) => ({
+                                              ...prev,
+                                              ...preset.config,
+                                            }))
+                                          }
+                                          className={`relative min-h-[76px] overflow-hidden rounded-xl border p-3 text-left transition-all ${
+                                            selected
+                                              ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                              : 'bg-black text-white border-white/10 hover:border-[#ccff00]/40'
+                                          }`}
+                                          title={preset.description}
+                                        >
+                                          <div
+                                            className="absolute inset-x-0 top-0 h-1"
+                                            style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.accentColor }}
+                                          />
+                                          {preset.config.designVariant === 'terminator-a' ? (
+                                            <div className="relative mb-2 h-8 overflow-hidden rounded border border-white/10" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.bodyBg }}>
+                                              <span className="absolute inset-y-0 left-0 w-[38%]" style={{ backgroundColor: '#ADADAD' }} />
+                                              <span className="absolute inset-y-0 left-[36%] w-[4%] skew-x-[-8deg]" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.headerBg }} />
+                                              <span className="absolute right-0 top-0 h-full w-[12%]" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.accentColor }} />
+                                            </div>
+                                          ) : (
+                                            <div className="mb-2 flex h-8 overflow-hidden rounded border border-white/10">
+                                              <span className="h-full w-1/4" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.headerBg }} />
+                                              <span className="flex-1" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.bodyBg }} />
+                                              <span className="h-full w-1/5" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.footerBg }} />
+                                            </div>
+                                          )}
+                                          <div className="text-[8px] font-black uppercase tracking-widest">
+                                            {preset.name}
+                                          </div>
+                                          <div
+                                            className={`mt-1 text-[7px] font-bold uppercase leading-snug tracking-wide ${
+                                              selected ? 'text-black/60' : 'text-zinc-600'
+                                            }`}
+                                          >
+                                            {preset.description}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
                                   </div>
                                 </div>
 
@@ -5868,7 +5953,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                             onClick={(e) => {
                                               e.preventDefault();
                                               e.stopPropagation();
-                                              patchTerminatorVisual(key, terminatorPresetDefaults[key]);
+                                              patchTerminatorVisual(key, DEFAULT_TERMINATOR_VISUAL[key]);
                                             }}
                                             className="p-0.5 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
                                             title="Reset"
@@ -5926,7 +6011,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      </button>
                                      <button
                                        type="button"
-                                       onClick={() => setFirstBloodVisual(DEFAULT_FIRST_BLOOD_VISUAL)}
+                                       onClick={resetFirstBloodToPreset}
                                        className="text-[7px] font-black text-zinc-600 hover:text-[#ccff00] uppercase tracking-widest flex items-center gap-1 transition-colors"
                                      >
                                        <RotateCcw size={10} /> {t('olb.reset')}
@@ -5977,15 +6062,37 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                   </button>
                                 </div>
 
+                                <div className="mt-5 pt-4 border-t border-white/5 flex items-center justify-between mb-3">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                    <Move size={12} className="text-[#ccff00]" />
+                                    Layout & Position
+                                  </h4>
+                                  <button
+                                    type="button"
+                                    onClick={resetFirstBloodLayout}
+                                    className="flex items-center gap-1 text-[7px] font-black text-zinc-600 uppercase tracking-widest hover:text-[#ccff00] transition-colors"
+                                  >
+                                    <RotateCcw size={8} /> Reset
+                                  </button>
+                                </div>
+
                                 <div className="grid grid-cols-3 gap-3">
                                   <div>
                                     <label className="text-[7px] font-bold text-zinc-600 uppercase block mb-1.5">
                                       Duration (Sec)
                                     </label>
                                     <ScrollableInput
-                                      value={clampFirstBloodDisplaySeconds(firstBloodVisual.displaySeconds)}
+                                      value={
+                                        clampFirstBloodDisplaySeconds(firstBloodVisual.displaySeconds) -
+                                        DEFAULT_FIRST_BLOOD_VISUAL.displaySeconds
+                                      }
                                       onChange={(val) =>
-                                        patchFirstBloodVisual('displaySeconds', clampFirstBloodDisplaySeconds(val))
+                                        patchFirstBloodVisual(
+                                          'displaySeconds',
+                                          clampFirstBloodDisplaySeconds(
+                                            DEFAULT_FIRST_BLOOD_VISUAL.displaySeconds + val
+                                          )
+                                        )
                                       }
                                       className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white font-black text-center outline-none"
                                     />
@@ -5997,12 +6104,12 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                     <ScrollableInput
                                       value={
                                         clampFirstBloodScale(firstBloodVisual.scale) -
-                                        DEFAULT_FIRST_BLOOD_VISUAL.scale
+                                        firstBloodLayoutBaseline.scale
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'scale',
-                                          clampFirstBloodScale(DEFAULT_FIRST_BLOOD_VISUAL.scale + val)
+                                          clampFirstBloodScale(firstBloodLayoutBaseline.scale + val)
                                         )
                                       }
                                       className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white font-black text-center outline-none"
@@ -6016,15 +6123,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampFirstBloodPosition(
                                           firstBloodVisual.x,
-                                          DEFAULT_FIRST_BLOOD_VISUAL.x
-                                        ) - DEFAULT_FIRST_BLOOD_VISUAL.x
+                                          firstBloodLayoutBaseline.x
+                                        ) - firstBloodLayoutBaseline.x
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'x',
                                           clampFirstBloodPosition(
-                                            DEFAULT_FIRST_BLOOD_VISUAL.x + val,
-                                            DEFAULT_FIRST_BLOOD_VISUAL.x
+                                            firstBloodLayoutBaseline.x + val,
+                                            firstBloodLayoutBaseline.x
                                           )
                                         )
                                       }
@@ -6039,15 +6146,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampFirstBloodPosition(
                                           firstBloodVisual.y,
-                                          DEFAULT_FIRST_BLOOD_VISUAL.y
-                                        ) - DEFAULT_FIRST_BLOOD_VISUAL.y
+                                          firstBloodLayoutBaseline.y
+                                        ) - firstBloodLayoutBaseline.y
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'y',
                                           clampFirstBloodPosition(
-                                            DEFAULT_FIRST_BLOOD_VISUAL.y + val,
-                                            DEFAULT_FIRST_BLOOD_VISUAL.y
+                                            firstBloodLayoutBaseline.y + val,
+                                            firstBloodLayoutBaseline.y
                                           )
                                         )
                                       }
@@ -6062,15 +6169,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampFirstBloodPosition(
                                           firstBloodVisual.playerImageX,
-                                          DEFAULT_FIRST_BLOOD_VISUAL.playerImageX
-                                        ) - DEFAULT_FIRST_BLOOD_VISUAL.playerImageX
+                                          firstBloodLayoutBaseline.playerImageX
+                                        ) - firstBloodLayoutBaseline.playerImageX
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'playerImageX',
                                           clampFirstBloodPosition(
-                                            DEFAULT_FIRST_BLOOD_VISUAL.playerImageX + val,
-                                            DEFAULT_FIRST_BLOOD_VISUAL.playerImageX
+                                            firstBloodLayoutBaseline.playerImageX + val,
+                                            firstBloodLayoutBaseline.playerImageX
                                           )
                                         )
                                       }
@@ -6085,15 +6192,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       value={
                                         clampFirstBloodPosition(
                                           firstBloodVisual.playerImageY,
-                                          DEFAULT_FIRST_BLOOD_VISUAL.playerImageY
-                                        ) - DEFAULT_FIRST_BLOOD_VISUAL.playerImageY
+                                          firstBloodLayoutBaseline.playerImageY
+                                        ) - firstBloodLayoutBaseline.playerImageY
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'playerImageY',
                                           clampFirstBloodPosition(
-                                            DEFAULT_FIRST_BLOOD_VISUAL.playerImageY + val,
-                                            DEFAULT_FIRST_BLOOD_VISUAL.playerImageY
+                                            firstBloodLayoutBaseline.playerImageY + val,
+                                            firstBloodLayoutBaseline.playerImageY
                                           )
                                         )
                                       }
@@ -6107,13 +6214,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                     <ScrollableInput
                                       value={
                                         clampFirstBloodPlayerImageScale(firstBloodVisual.playerImageScale) -
-                                        DEFAULT_FIRST_BLOOD_VISUAL.playerImageScale
+                                        firstBloodLayoutBaseline.playerImageScale
                                       }
                                       onChange={(val) =>
                                         patchFirstBloodVisual(
                                           'playerImageScale',
                                           clampFirstBloodPlayerImageScale(
-                                            DEFAULT_FIRST_BLOOD_VISUAL.playerImageScale + val
+                                            firstBloodLayoutBaseline.playerImageScale + val
                                           )
                                         )
                                       }
@@ -6143,6 +6250,159 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       }
                                       className="w-full bg-black border border-white/10 rounded-lg px-2 py-2 text-[10px] text-white font-black text-center outline-none"
                                     />
+                                  </div>
+                                </div>
+
+                                <div className="mt-5 pt-4 border-t border-white/5">
+                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    <Palette size={12} className="text-[#ccff00]" />
+                                    Visual Preset
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {FIRST_BLOOD_VISUAL_PRESETS.map((preset) => {
+                                      const selected = Object.entries(preset.config).every(
+                                        ([key, value]) =>
+                                          firstBloodVisual[key as keyof FirstBloodVisualConfig] === value
+                                      );
+                                      return (
+                                        <button
+                                          key={preset.id}
+                                          type="button"
+                                          onClick={() =>
+                                            setFirstBloodVisual((prev) => ({
+                                              ...prev,
+                                              ...preset.config,
+                                            }))
+                                          }
+                                          className={`relative min-h-[84px] overflow-hidden rounded-xl border p-3 text-left transition-all ${
+                                            selected
+                                              ? 'bg-[#ccff00] text-black border-[#ccff00]'
+                                              : 'bg-black text-white border-white/10 hover:border-[#ccff00]/40'
+                                          }`}
+                                          title={preset.description}
+                                        >
+                                          {preset.previewImage ? (
+                                            <div className="relative mb-2 h-9 overflow-hidden rounded border border-white/10 bg-zinc-950">
+                                              <img
+                                                src={preset.previewImage}
+                                                className="h-full w-full object-cover"
+                                                alt=""
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div className="relative mb-2 h-9 overflow-hidden rounded border border-white/10 bg-zinc-950">
+                                              {preset.config.designVariant === 'diagonal-strike' ? (
+                                                <>
+                                                  <span
+                                                    className="absolute inset-0"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg,
+                                                      clipPath: 'polygon(6% 0, 100% 0, 94% 100%, 0 100%, 0 24%)',
+                                                    }}
+                                                  />
+                                                  <span
+                                                    className="absolute left-2 top-1 h-2.5 w-[58%] -skew-x-[20deg]"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.headerBg }}
+                                                  />
+                                                  <span className="absolute bottom-1 left-3 h-2 w-[38%] bg-black/50" />
+                                                  <span
+                                                    className="absolute right-2 top-1 h-7 w-7"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.footerBg,
+                                                      clipPath: 'polygon(22% 0, 100% 0, 100% 100%, 0 100%)',
+                                                    }}
+                                                  />
+                                                </>
+                                              ) : preset.config.designVariant === 'photo-split' ? (
+                                                <>
+                                                  <span
+                                                    className="absolute left-0 top-0 h-full w-[34%]"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.footerBg,
+                                                      clipPath: 'polygon(0 0, 100% 0, 82% 100%, 0 100%)',
+                                                    }}
+                                                  />
+                                                  <span
+                                                    className="absolute right-0 top-0 h-full w-[72%]"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg,
+                                                      clipPath: 'polygon(10% 0, 100% 0, 100% 100%, 0 100%)',
+                                                    }}
+                                                  />
+                                                  <span
+                                                    className="absolute left-[43%] top-1.5 h-2.5 w-[42%]"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.headerBg }}
+                                                  />
+                                                  <span className="absolute bottom-2 left-[44%] h-1.5 w-[32%] bg-black/50" />
+                                                </>
+                                              ) : preset.config.designVariant === 'compact-hud' ? (
+                                                <>
+                                                  <span
+                                                    className="absolute inset-x-1 inset-y-2"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg,
+                                                      clipPath: 'polygon(4% 0, 100% 0, 96% 100%, 0 100%)',
+                                                    }}
+                                                  />
+                                                  <span
+                                                    className="absolute left-2 top-2 h-5 w-5"
+                                                    style={{
+                                                      backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.footerBg,
+                                                      clipPath: 'polygon(0 0, 100% 0, 80% 100%, 0 100%)',
+                                                    }}
+                                                  />
+                                                  <span
+                                                    className="absolute left-8 top-2.5 h-2 w-[36%]"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.headerBg }}
+                                                  />
+                                                  <span className="absolute bottom-2 left-8 h-1.5 w-[46%] bg-black/55" />
+                                                </>
+                                              ) : preset.config.designVariant === 'classic-lock' ? (
+                                                <div className="flex h-full flex-col overflow-hidden">
+                                                  <span
+                                                    className="h-[28%]"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.headerBg }}
+                                                  />
+                                                  <span
+                                                    className="flex-1"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg }}
+                                                  />
+                                                  <span
+                                                    className="h-[16%]"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.footerBg }}
+                                                  />
+                                                </div>
+                                              ) : (
+                                                <div className="flex h-full overflow-hidden">
+                                                  <span
+                                                    className="h-full w-1/4"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.headerBg }}
+                                                  />
+                                                  <span
+                                                    className="flex-1"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.bodyBg }}
+                                                  />
+                                                  <span
+                                                    className="h-full w-1/5"
+                                                    style={{ backgroundColor: DEFAULT_FIRST_BLOOD_VISUAL.footerBg }}
+                                                  />
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                          <div className="text-[8px] font-black uppercase tracking-widest">
+                                            {preset.name}
+                                          </div>
+                                          <div
+                                            className={`mt-1 text-[7px] font-bold uppercase leading-snug tracking-wide ${
+                                              selected ? 'text-black/60' : 'text-zinc-600'
+                                            }`}
+                                          >
+                                            {preset.description}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
                                   </div>
                                 </div>
 
@@ -6214,12 +6474,21 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                 </div>
 
                                 <div className="mt-5 pt-4 border-t border-white/5">
-                                  <h4 className="text-[9px] font-black text-white uppercase tracking-widest mb-3 flex items-center gap-2">
-                                    <Palette size={12} className="text-[#ccff00]" />
-                                    Banner Background & Text
-                                  </h4>
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                      <Palette size={12} className="text-[#ccff00]" />
+                                      Text Colors
+                                    </h4>
+                                    <button
+                                      type="button"
+                                      onClick={resetFirstBloodColors}
+                                      className="flex items-center gap-1 text-[7px] font-black text-zinc-600 uppercase tracking-widest hover:text-[#ccff00] transition-colors"
+                                    >
+                                      <RotateCcw size={8} /> Reset
+                                    </button>
+                                  </div>
                                   <div className="grid grid-cols-3 gap-2">
-                                    {FIRST_BLOOD_COLOR_KEYS.map((key) => (
+                                    {(['accentColor', 'textColor', 'mutedTextColor'] as const).map((key) => (
                                       <div
                                         key={key}
                                         className="bg-black border border-white/10 rounded-xl p-2.5 flex flex-col justify-between gap-1.5 relative group hover:border-[#ccff00]/30 transition-all h-[88px]"
@@ -6262,6 +6531,150 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                     ))}
                                   </div>
                                 </div>
+
+                                {!firstBloodVisual.useCustomBackground && firstBloodVisual.designVariant === 'classic-lock' && (
+                                  <div className="mt-5 pt-4 border-t border-white/5">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h4 className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                        <Palette size={12} className="text-[#ccff00]" />
+                                        Panel Colors
+                                      </h4>
+                                      <button
+                                        type="button"
+                                        onClick={resetFirstBloodColors}
+                                        className="flex items-center gap-1 text-[7px] font-black text-zinc-600 uppercase tracking-widest hover:text-[#ccff00] transition-colors"
+                                      >
+                                        <RotateCcw size={8} /> Reset
+                                      </button>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                      {(['headerBg', 'bodyBg', 'footerBg'] as const).map((key) => (
+                                        <div
+                                          key={key}
+                                          className="bg-black border border-white/10 rounded-xl p-2.5 flex flex-col justify-between gap-1.5 relative group hover:border-[#ccff00]/30 transition-all h-[88px]"
+                                        >
+                                          <div className="flex justify-between items-start relative z-30">
+                                            <label className="text-[6px] font-black uppercase tracking-widest text-zinc-500 pointer-events-none leading-tight">
+                                              {FIRST_BLOOD_COLOR_LABELS[key]}
+                                            </label>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                patchFirstBloodVisual(key, DEFAULT_FIRST_BLOOD_VISUAL[key]);
+                                              }}
+                                              className="p-0.5 rounded hover:bg-white/20 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                              title="Reset"
+                                            >
+                                              <RotateCcw size={8} />
+                                            </button>
+                                          </div>
+                                          <span className="text-[8px] font-[1000] text-white uppercase truncate relative z-10">
+                                            {firstBloodVisual[key]}
+                                          </span>
+                                          <input
+                                            type="color"
+                                            value={firstBloodVisual[key]}
+                                            onChange={(e) => patchFirstBloodVisual(key, e.target.value)}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                          />
+                                          <div
+                                            className="absolute inset-0 opacity-25 group-hover:opacity-35 pointer-events-none rounded-xl"
+                                            style={{ backgroundColor: firstBloodVisual[key] }}
+                                          />
+                                          <div
+                                            className="absolute bottom-2 right-2 w-5 h-5 rounded-full border border-white/20 pointer-events-none z-10"
+                                            style={{ backgroundColor: firstBloodVisual[key] }}
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {!firstBloodVisual.useCustomBackground &&
+                                  (firstBloodVisual.designVariant === 'default-reference' || firstBloodVisual.designVariant === 'photo-split') && (
+                                  <div className="mt-5 pt-4 border-t border-white/5">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h4 className="text-[9px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                        <Palette size={12} className="text-[#ccff00]" />
+                                        Asset Palette
+                                      </h4>
+                                      <button
+                                        type="button"
+                                        onClick={() => patchFirstBloodVisual(
+                                          'assetPaletteOverride',
+                                          firstBloodVisual.designVariant === 'photo-split'
+                                            ? [...HERO_SPLIT_ORIGINAL_PALETTE]
+                                            : [...BROADCAST_CUT_ORIGINAL_PALETTE]
+                                        )}
+                                        className="flex items-center gap-1 text-[7px] font-black text-zinc-600 uppercase tracking-widest hover:text-[#ccff00] transition-colors"
+                                      >
+                                        <RotateCcw size={8} /> Reset
+                                      </button>
+                                    </div>
+                                    {(() => {
+                                      const isHeroSplit = firstBloodVisual.designVariant === 'photo-split';
+                                      const defaultPalette = isHeroSplit ? HERO_SPLIT_ORIGINAL_PALETTE : BROADCAST_CUT_ORIGINAL_PALETTE;
+                                      const palette = [...(firstBloodVisual.assetPaletteOverride ?? defaultPalette)];
+                                      while (palette.length < defaultPalette.length) {
+                                        palette.push(defaultPalette[palette.length]);
+                                      }
+                                      const makeSwatch = (label: string, idx: number, groupIndices?: readonly number[]) => (
+                                        <div key={label} className="flex flex-col gap-1.5">
+                                          <label className="text-[7px] font-bold text-zinc-600 uppercase text-center">{label}</label>
+                                          <div className="relative h-[34px] w-full rounded-lg border border-white/10 overflow-hidden cursor-pointer group hover:border-[#ccff00]/30 transition-all">
+                                            <div className="absolute inset-0" style={{ backgroundColor: palette[idx] ?? defaultPalette[idx] }} />
+                                            <input
+                                              type="color"
+                                              value={palette[idx] ?? defaultPalette[idx]}
+                                              onChange={(e) => {
+                                                const next = [...palette];
+                                                (groupIndices ?? [idx]).forEach(i => { next[i] = e.target.value; });
+                                                patchFirstBloodVisual('assetPaletteOverride', next);
+                                              }}
+                                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                      if (isHeroSplit) {
+                                        return (
+                                          <div className="grid grid-cols-3 gap-2">
+                                            {makeSwatch('Panel', HERO_SPLIT_PANEL_INDICES[0], [...HERO_SPLIT_PANEL_INDICES])}
+                                            {makeSwatch('Accent', HERO_SPLIT_ACCENT_INDEX)}
+                                            {makeSwatch('Light 1', HERO_SPLIT_LIGHT_INDICES[0])}
+                                            {makeSwatch('Light 2', HERO_SPLIT_LIGHT_INDICES[1])}
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div className="grid grid-cols-3 gap-2">
+                                          {makeSwatch('Logo Panel', BROADCAST_CUT_LOGO_PANEL_INDICES[0], [...BROADCAST_CUT_LOGO_PANEL_INDICES])}
+                                          {makeSwatch('Bar', BROADCAST_CUT_BAR_INDICES[0], [...BROADCAST_CUT_BAR_INDICES])}
+                                          <div className="flex flex-col gap-1.5">
+                                            <label className="text-[7px] font-bold text-zinc-600 uppercase text-center">Footer BG</label>
+                                            <div className="relative h-[34px] w-full rounded-lg border border-white/10 overflow-hidden cursor-pointer group hover:border-[#ccff00]/30 transition-all">
+                                              <div className="absolute inset-0" style={{ backgroundColor: firstBloodVisual.footerBg }} />
+                                              <input
+                                                type="color"
+                                                value={firstBloodVisual.footerBg}
+                                                onChange={(e) => patchFirstBloodVisual('footerBg', e.target.value)}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                              />
+                                            </div>
+                                          </div>
+                                          {BROADCAST_CUT_LIGHT_INDICES.map(idx => makeSwatch(BROADCAST_CUT_PALETTE_LABELS[idx], idx))}
+                                          {makeSwatch('Kill BG', BROADCAST_CUT_ACCENT_INDEX)}
+                                        </div>
+                                      );
+                                    })()}
+                                    <p className="mt-2 text-[7px] text-zinc-600 leading-relaxed">
+                                      Ganti warna bawaan PNG secara langsung via pixel replacement. Perubahan diterapkan dalam ~0.5 detik.
+                                    </p>
+                                  </div>
+                                )}
                            </div>
                         </div>
                           )}

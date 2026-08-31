@@ -1,7 +1,11 @@
+export type TerminatorKillCounterSource = 'cumulative' | 'threshold';
+
 export interface TerminatorVisualConfig {
   enabled: boolean;
   killThreshold: number;
+  killCounterSource: TerminatorKillCounterSource;
   displaySeconds: number;
+  designVariant: TerminatorDesignVariant;
   scale: number;
   x: number;
   y: number;
@@ -19,13 +23,12 @@ export interface TerminatorVisualConfig {
   useCustomBackground: boolean;
   previewToken: number;
   previewHold: boolean;
-  designPreset: TerminatorDesignPresetId;
 }
-
-export type TerminatorDesignPresetId = 'tactical-lime' | 'crimson-hunter' | 'ice-vector';
 
 export const TERMINATOR_CONFIG_KEY = 'BROHUBS_TERMINATOR_CONFIG';
 export const TERMINATOR_PLAYER_KILL_HISTORY_KEY = 'BROHUBS_TERMINATOR_PLAYER_KILL_HISTORY';
+
+export type TerminatorDesignVariant = 'classic-lock' | 'terminator-a';
 
 export type TerminatorPlayerKillHistory = Record<string, number>;
 
@@ -36,13 +39,15 @@ export function terminatorPlayerKey(team: string, player: string): string {
 export const DEFAULT_TERMINATOR_VISUAL: TerminatorVisualConfig = {
   enabled: true,
   killThreshold: 5,
+  killCounterSource: 'cumulative',
   displaySeconds: 5,
-  scale: 41,
+  designVariant: 'classic-lock',
+  scale: 30,
   x: 26,
   y: 539,
-  playerImageX: -43,
-  playerImageY: 95,
-  playerImageScale: 255,
+  playerImageX: 0,
+  playerImageY: 718,
+  playerImageScale: 200,
   title: 'TERMINATOR',
   accentColor: '#ccff00',
   headerBg: '#74a57f',
@@ -54,165 +59,84 @@ export const DEFAULT_TERMINATOR_VISUAL: TerminatorVisualConfig = {
   useCustomBackground: false,
   previewToken: 0,
   previewHold: false,
-  designPreset: 'tactical-lime',
 };
 
-export interface TerminatorDesignPreset {
-  id: TerminatorDesignPresetId;
+export interface TerminatorVisualPreset {
+  id: string;
   name: string;
   description: string;
-  swatches: string[];
   config: Pick<
     TerminatorVisualConfig,
-    | 'displaySeconds'
+    | 'designVariant'
+    | 'title'
     | 'scale'
     | 'x'
     | 'y'
     | 'playerImageX'
     | 'playerImageY'
     | 'playerImageScale'
-    | 'title'
-    | 'accentColor'
-    | 'headerBg'
-    | 'bodyBg'
-    | 'footerBg'
-    | 'textColor'
-    | 'mutedTextColor'
     | 'useCustomBackground'
-    | 'designPreset'
+    | 'customBackgroundUrl'
   >;
 }
 
-export const TERMINATOR_DESIGN_PRESETS: TerminatorDesignPreset[] = [
+export const TERMINATOR_VISUAL_PRESETS: TerminatorVisualPreset[] = [
   {
-    id: 'tactical-lime',
-    name: 'Command Panel',
-    description: 'Panel komando klasik dengan struktur rapi dan solid.',
-    swatches: ['#74a57f', '#e8e6df', '#ccff00'],
+    id: 'classic-lock',
+    name: 'Classic Lock',
+    description: 'Default stacked banner.',
     config: {
-      displaySeconds: 5,
+      designVariant: 'classic-lock',
+      title: 'TERMINATOR',
       scale: 41,
       x: 26,
       y: 539,
-      playerImageX: -43,
-      playerImageY: 95,
-      playerImageScale: 255,
-      title: 'TERMINATOR',
-      accentColor: '#ccff00',
-      headerBg: '#74a57f',
-      bodyBg: '#e8e6df',
-      footerBg: '#74a57f',
-      textColor: '#000000',
-      mutedTextColor: '#4d5650',
-      useCustomBackground: false,
-      designPreset: 'tactical-lime',
-    },
-  },
-  {
-    id: 'crimson-hunter',
-    name: 'Strike Frame',
-    description: 'Bentuk diagonal agresif dengan panel player lebih tajam.',
-    swatches: ['#74a57f', '#e8e6df', '#ccff00'],
-    config: {
-      displaySeconds: 5,
-      scale: 43,
-      x: 34,
-      y: 526,
       playerImageX: -64,
-      playerImageY: 137,
-      playerImageScale: 278,
-      title: 'TERMINATOR',
-      accentColor: '#ccff00',
-      headerBg: '#74a57f',
-      bodyBg: '#e8e6df',
-      footerBg: '#74a57f',
-      textColor: '#000000',
-      mutedTextColor: '#4d5650',
+      playerImageY: 168,
+      playerImageScale: 290,
       useCustomBackground: false,
-      designPreset: 'crimson-hunter',
+      customBackgroundUrl: '',
     },
   },
   {
-    id: 'ice-vector',
-    name: 'Vector Shield',
-    description: 'Frame modern berlapis dengan bracket dan rail highlight.',
-    swatches: ['#74a57f', '#e8e6df', '#ccff00'],
+    id: 'terminator-a',
+    name: 'Terminator A',
+    description: 'Tactical frame dengan foto pemain dan kill counter.',
     config: {
-      displaySeconds: 5,
-      scale: 42,
-      x: 30,
-      y: 534,
-      playerImageX: -45,
-      playerImageY: 131,
-      playerImageScale: 280,
+      designVariant: 'terminator-a',
       title: 'TERMINATOR',
-      accentColor: '#ccff00',
-      headerBg: '#74a57f',
-      bodyBg: '#e8e6df',
-      footerBg: '#74a57f',
-      textColor: '#000000',
-      mutedTextColor: '#4d5650',
+      scale: 30,
+      x: 26,
+      y: 539,
+      playerImageX: 0,
+      playerImageY: 718,
+      playerImageScale: 200,
       useCustomBackground: false,
-      designPreset: 'ice-vector',
+      customBackgroundUrl: '',
     },
   },
 ];
 
-export const getTerminatorDesignPreset = (
-  id?: TerminatorDesignPresetId
-): TerminatorDesignPreset =>
-  TERMINATOR_DESIGN_PRESETS.find((preset) => preset.id === id) ?? TERMINATOR_DESIGN_PRESETS[0];
+// Baseline "0" untuk slider offset (Scale/Pos/Player) mengikuti design yang
+// sedang dibuka — Classic Lock & Terminator A punya nilai dasar berbeda, diambil
+// dari preset masing-masing.
+export type TerminatorOffsetBaseline = Pick<
+  TerminatorVisualConfig,
+  'scale' | 'x' | 'y' | 'playerImageX' | 'playerImageY' | 'playerImageScale'
+>;
 
-export const applyTerminatorDesignPreset = (
-  current: TerminatorVisualConfig,
-  presetId: TerminatorDesignPresetId
-): TerminatorVisualConfig => {
-  const preset = getTerminatorDesignPreset(presetId);
+export const terminatorDesignBaseline = (
+  variant: TerminatorDesignVariant
+): TerminatorOffsetBaseline => {
+  const preset = TERMINATOR_VISUAL_PRESETS.find((item) => item.config.designVariant === variant);
+  const base = preset?.config ?? DEFAULT_TERMINATOR_VISUAL;
   return {
-    ...current,
-    ...preset.config,
-  };
-};
-
-const LEGACY_TERMINATOR_PLAYER_PRESET_DEFAULTS: Record<
-  TerminatorDesignPresetId,
-  Array<Pick<TerminatorVisualConfig, 'playerImageX' | 'playerImageY' | 'playerImageScale'>>
-> = {
-  'tactical-lime': [
-    { playerImageX: -64, playerImageY: 168, playerImageScale: 290 },
-    { playerImageX: -32, playerImageY: 30, playerImageScale: 185 },
-  ],
-  'crimson-hunter': [
-    { playerImageX: -44, playerImageY: 148, playerImageScale: 274 },
-    { playerImageX: -18, playerImageY: 28, playerImageScale: 178 },
-  ],
-  'ice-vector': [
-    { playerImageX: -58, playerImageY: 154, playerImageScale: 282 },
-    { playerImageX: -24, playerImageY: 28, playerImageScale: 180 },
-  ],
-};
-
-export const migrateTerminatorPlayerImageDefaults = (
-  current: TerminatorVisualConfig
-): TerminatorVisualConfig => {
-  const presetId = current.designPreset ?? DEFAULT_TERMINATOR_VISUAL.designPreset;
-  const legacyDefaults = LEGACY_TERMINATOR_PLAYER_PRESET_DEFAULTS[presetId];
-  const next = getTerminatorDesignPreset(presetId).config;
-  const shouldMigrate = legacyDefaults.some(
-    (legacy) =>
-      current.playerImageX === legacy.playerImageX &&
-      current.playerImageY === legacy.playerImageY &&
-      current.playerImageScale === legacy.playerImageScale
-  );
-  if (!shouldMigrate) {
-    return current;
-  }
-
-  return {
-    ...current,
-    playerImageX: next.playerImageX,
-    playerImageY: next.playerImageY,
-    playerImageScale: next.playerImageScale,
+    scale: base.scale,
+    x: base.x,
+    y: base.y,
+    playerImageX: base.playerImageX,
+    playerImageY: base.playerImageY,
+    playerImageScale: base.playerImageScale,
   };
 };
 

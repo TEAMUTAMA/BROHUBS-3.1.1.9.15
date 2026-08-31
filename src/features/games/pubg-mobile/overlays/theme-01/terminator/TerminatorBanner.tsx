@@ -5,10 +5,23 @@ import {
   clampTerminatorPosition,
   clampTerminatorPlayerImageScale,
   clampTerminatorScale,
+  clampTerminatorKillThreshold,
   type TerminatorVisualConfig,
 } from '@/features/games/pubg-mobile/logic/terminatorVisual';
 
 const DEFAULT_TERMINATOR_PLAYER_IMAGE = '/assets/overlays/terminator-default-player.png';
+const TERMINATOR_A_BG = '/assets/overlays/Master-terminator-A-Polos.webp';
+const TERMINATOR_A_CONDENSED_FONT = 'Impact, "Anton", "Bebas Neue", "Oswald", Arial, sans-serif';
+const TERMINATOR_A_META_FONT = '"Oswald", "Teko", "Bebas Neue", Arial, sans-serif';
+
+const getTerminatorATitleFontSize = (title: string) => {
+  const len = title.trim().length;
+  if (len <= 4) return 230;
+  if (len <= 6) return 200;
+  if (len <= 8) return 165;
+  if (len <= 10) return 128;
+  return 108;
+};
 
 const extractImageUrl = (raw?: string): string => {
   const value = raw?.trim() || '';
@@ -163,6 +176,7 @@ const PlayerPhoto: React.FC<{
 export const TerminatorBanner: React.FC<TerminatorBannerProps> = ({
   target,
   config,
+  currentMatch,
   className = 'absolute',
   forceShow = false,
 }) => {
@@ -171,28 +185,234 @@ export const TerminatorBanner: React.FC<TerminatorBannerProps> = ({
   const y = clampTerminatorPosition(config.y, 96);
   const customDesignUrl = config.useCustomBackground ? config.customBackgroundUrl.trim() : '';
   const hasCustomDesign = Boolean(customDesignUrl);
-  const designPreset = config.designPreset ?? 'tactical-lime';
-  const isStrikeFrame = designPreset === 'crimson-hunter';
-  const isVectorShield = designPreset === 'ice-vector';
-  const panelClipPath = isStrikeFrame
-    ? 'polygon(0 0, 96% 0, 100% 22%, 100% 100%, 4% 100%, 0 82%)'
-    : isVectorShield
-      ? 'polygon(3% 0, 100% 0, 100% 82%, 95% 100%, 0 100%, 0 18%)'
-      : undefined;
-  const bodyBackground = isStrikeFrame
-    ? `linear-gradient(112deg, ${config.bodyBg} 0%, ${config.bodyBg} 55%, ${config.headerBg} 56%, ${config.headerBg} 100%)`
-    : isVectorShield
-      ? `linear-gradient(110deg, ${config.bodyBg} 0%, ${config.bodyBg} 62%, ${config.accentColor}22 100%)`
-      : config.bodyBg;
+  const designVariant = hasCustomDesign ? 'classic-lock' : config.designVariant;
+  const isTerminatorA = !hasCustomDesign && designVariant === 'terminator-a';
+  const frameClass = hasCustomDesign
+    ? 'flex h-[540px] w-[960px] flex-col'
+    : isTerminatorA
+      ? 'h-[1024px] w-[1536px]'
+      : 'flex h-auto w-[760px] flex-col';
+  const frameRadiusClass = isTerminatorA ? 'rounded-none' : 'rounded-xl';
+  const terminatorATitleFontSize = getTerminatorATitleFontSize(config.title);
+  // Angka di kill counter: "threshold" = target syarat jadi Terminator,
+  // "cumulative" = total kill gabungan Match 1 → saat ingame ini.
+  const killCounterValue =
+    config.killCounterSource === 'threshold'
+      ? clampTerminatorKillThreshold(config.killThreshold)
+      : target?.cumulativeKills ?? target?.kills ?? 0;
+
+  const renderPlayerPhoto = (widthClass = 'w-[290px]', heightClass = 'h-[174px]') => (
+    <div className={`${widthClass} shrink-0`}>
+      <div className={`flex ${heightClass} w-full items-end justify-center overflow-visible`}>
+        <PlayerPhoto
+          key={`${target?.teamName}-${target?.player}-${target?.image || 'default'}`}
+          src={target?.image}
+          mutedColor={config.mutedTextColor}
+          accentColor={config.accentColor}
+          x={config.playerImageX}
+          y={config.playerImageY}
+          scale={config.playerImageScale}
+        />
+      </div>
+    </div>
+  );
+
+  const renderLogo = (className = 'h-[92px] w-[92px]') => (
+    <div className={`flex ${className} items-center justify-center overflow-hidden rounded-lg border border-white/20 bg-black/15`}>
+      {target?.logo ? (
+        <img src={target.logo} className="h-full w-full object-contain p-2" referrerPolicy="no-referrer" />
+      ) : (
+        <Shield size={54} className="text-white/80" />
+      )}
+    </div>
+  );
+
+  const renderClassic = () => (
+    <>
+      <div
+        className="relative z-10 px-7 py-5 text-white"
+        style={{ backgroundColor: hasCustomDesign ? 'transparent' : config.headerBg }}
+      >
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <Crosshair size={28} strokeWidth={3} />
+            <h1 className="text-[44px] font-[1000] uppercase leading-none tracking-[0.08em]">
+              {config.title}
+            </h1>
+          </div>
+          {renderLogo()}
+        </div>
+      </div>
+
+      <div
+        className={`relative z-10 px-7 py-6 ${hasCustomDesign ? 'flex flex-1 items-center' : ''}`}
+        style={{ backgroundColor: hasCustomDesign ? 'transparent' : config.bodyBg, color: config.textColor }}
+      >
+        <div className="flex items-center justify-between gap-6">
+          <div className="min-w-0">
+            <p
+              className="text-[12px] font-[1000] uppercase tracking-[0.32em]"
+              style={{ color: config.mutedTextColor }}
+            >
+              Player
+            </p>
+            <h2 className="truncate text-[42px] font-[1000] uppercase leading-none">
+              {target?.player}
+            </h2>
+            <div className="mt-3 inline-flex items-center gap-2 rounded bg-black px-3 py-1.5">
+              <span
+                className="text-[12px] font-[1000] uppercase tracking-[0.16em]"
+                style={{ color: config.accentColor }}
+              >
+                {target?.team} / #{target?.rank}
+              </span>
+            </div>
+          </div>
+          {renderPlayerPhoto()}
+        </div>
+      </div>
+
+      <div
+        className="relative z-10 flex items-center justify-between border-t-2 px-7 py-3"
+        style={{
+          backgroundColor: hasCustomDesign ? 'transparent' : config.footerBg,
+          borderColor: hasCustomDesign ? 'transparent' : 'rgb(0 0 0 / 0.1)',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="h-3 w-3 rounded-full"
+            style={{ backgroundColor: config.accentColor, boxShadow: `0 0 14px ${config.accentColor}` }}
+          />
+          <span className="text-[11px] font-[1000] uppercase tracking-[0.26em] text-white">
+            Target locked
+          </span>
+        </div>
+        <span className="text-[10px] font-black uppercase tracking-[0.28em] text-white/70">
+          {target?.teamName}
+        </span>
+      </div>
+    </>
+  );
+
+  const renderTerminatorA = () => (
+    <div className="relative h-[1024px] w-[1536px] overflow-hidden" style={{ color: config.textColor }}>
+      {/* Background asset */}
+      <img
+        src={TERMINATOR_A_BG}
+        className="absolute inset-0 h-full w-full object-fill"
+        alt=""
+        aria-hidden="true"
+      />
+
+      {/* Foto pemain — mengisi zona #c0c0c0 di background (scan-based)
+          Top extended ke atas zona supaya foto bisa "menonjol" keluar dari frame.
+          Kiri/kanan/bawah tetap di-clip mengikuti bentuk bg. */}
+      <div
+        className="absolute"
+        style={{
+          left: 243,
+          top: 0,
+          width: 445,
+          height: 695,
+          clipPath: 'polygon(0% 0%, 100% 0%, 100% 23%, 78% 100%, 0% 100%)',
+        }}
+      >
+        <div className="absolute inset-0">
+          <PlayerPhoto
+            key={`${target?.teamName}-${target?.player}-${target?.image || 'default'}-terminator-a`}
+            src={target?.image}
+            mutedColor={config.mutedTextColor}
+            accentColor={config.accentColor}
+            x={config.playerImageX}
+            y={config.playerImageY}
+            scale={config.playerImageScale}
+          />
+        </div>
+        <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/50 to-transparent" />
+      </div>
+
+      {/* Judul (TERMINATOR) — panel cream kanan, baris atas */}
+      <div className="absolute overflow-hidden" style={{ left: 752, top: 255, width: 588 }}>
+        <h1
+          className="font-[900] uppercase leading-none"
+          style={{
+            color: config.textColor,
+            fontFamily: TERMINATOR_A_CONDENSED_FONT,
+            fontSize: terminatorATitleFontSize,
+            letterSpacing: '0.025em',
+            transform: 'scaleX(0.88)',
+            transformOrigin: 'left center',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {config.title}
+        </h1>
+      </div>
+
+      {/* Logo Team — panel cream kanan, baris bawah */}
+      <div
+        className="absolute flex shrink-0 items-center justify-center overflow-hidden"
+        style={{
+          left: 726,
+          top: 380,
+          width: 274,
+          height: 270,
+        }}
+      >
+        {target?.logo ? (
+          <img src={target.logo} className="h-full w-full object-contain p-2" referrerPolicy="no-referrer" alt="" />
+        ) : (
+          <Shield className="h-full w-full p-2" strokeWidth={2.5} style={{ color: config.accentColor }} />
+        )}
+      </div>
+
+      {/* Nama Pemain — posisi independen dari logo.
+          Wrap otomatis: turun ke baris ke-2 saat teks melebihi `width` (285px),
+          maksimal 2 baris (line-clamp-2). Ubah `width` untuk geser batas 2 baris. */}
+      <p
+        className="absolute line-clamp-2 break-words font-[900] uppercase leading-[0.95] tracking-[0.01em]"
+        style={{
+          left: 1050,
+          top: 400,
+          color: config.textColor,
+          fontFamily: TERMINATOR_A_META_FONT,
+          fontSize: 45,
+          width: 285,
+          textAlign: 'right',
+        }}
+      >
+        {target?.player}
+      </p>
+
+      {/* Kill counter — overlay di atas kotak TOTAL KILL di background */}
+      <div className="absolute text-center" style={{ left: 1155, top: 525, width: 160 }}>
+        <p
+          className="font-[900] leading-none"
+          style={{
+            color: config.textColor,
+            fontFamily: TERMINATOR_A_CONDENSED_FONT,
+            fontSize: 70,
+            letterSpacing: '0.01em',
+          }}
+        >
+          {String(killCounterValue).padStart(2, '0')}
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderDesign = () => {
+    if (isTerminatorA) return renderTerminatorA();
+    return renderClassic();
+  };
 
   return (
     <AnimatePresence mode="wait">
       {target && (config.enabled || forceShow) && (
         <motion.div
           key={`${target.team}-${target.player}-${target.kills}`}
-          className={`${className} ${
-            hasCustomDesign ? 'flex h-[540px] w-[960px] flex-col' : 'w-[760px]'
-          } overflow-visible rounded-xl shadow-2xl pointer-events-none z-[500]`}
+          className={`${className} ${frameClass} ${frameRadiusClass} overflow-hidden pointer-events-none z-[500] ${isTerminatorA ? '' : 'shadow-2xl'}`}
           style={{ left: x, bottom: y, transformOrigin: 'bottom left' }}
           initial={{ opacity: 0, x: -220, y: 18, scale: scale * 0.86, filter: 'blur(8px)' }}
           animate={{
@@ -238,174 +458,7 @@ export const TerminatorBanner: React.FC<TerminatorBannerProps> = ({
               transition: { duration: 0.5, ease: 'easeInOut' },
             }}
           />
-          <div
-            className="relative z-10 px-7 py-5 text-white"
-            style={{
-              backgroundColor: hasCustomDesign ? 'transparent' : config.headerBg,
-              clipPath: hasCustomDesign ? undefined : panelClipPath,
-            }}
-          >
-            {!hasCustomDesign && !isStrikeFrame && !isVectorShield && (
-              <>
-                <div className="absolute inset-y-0 left-0 w-2" style={{ backgroundColor: config.accentColor }} />
-                <div
-                  className="absolute left-2 top-1/2 h-11 w-1.5 -translate-y-1/2 rounded-full"
-                  style={{ backgroundColor: config.accentColor, boxShadow: `0 0 16px ${config.accentColor}` }}
-                />
-                <div className="absolute left-5 top-4 h-2 w-2 rotate-45 bg-white/60" />
-                <div className="absolute left-5 bottom-4 h-2 w-2 rotate-45 bg-white/35" />
-              </>
-            )}
-            {!hasCustomDesign && isStrikeFrame && (
-              <>
-                <div className="absolute inset-y-0 left-0 w-3" style={{ backgroundColor: config.accentColor }} />
-                <div
-                  className="absolute -right-10 top-0 h-full w-[180px] -skew-x-12 opacity-70"
-                  style={{ backgroundColor: config.accentColor }}
-                />
-              </>
-            )}
-            {!hasCustomDesign && isVectorShield && (
-              <>
-                <div className="absolute left-0 top-0 h-2 w-28" style={{ backgroundColor: config.accentColor }} />
-                <div className="absolute bottom-0 right-0 h-2 w-36" style={{ backgroundColor: config.accentColor }} />
-                <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.20),transparent_32%,rgba(255,255,255,0.08))]" />
-              </>
-            )}
-            <div className="flex items-center justify-between gap-6">
-              <div>
-                <div className="flex items-center gap-3">
-                  <Crosshair size={28} strokeWidth={3} />
-                  <h1 className="text-[44px] font-[1000] uppercase leading-none tracking-[0.08em]">
-                    {config.title}
-                  </h1>
-                </div>
-              </div>
-              <div className="flex h-[92px] w-[92px] items-center justify-center overflow-hidden rounded-lg border border-white/20 bg-black/15">
-                {target.logo ? (
-                  <img src={target.logo} className="h-full w-full object-contain p-2" referrerPolicy="no-referrer" />
-                ) : (
-                  <Shield size={54} className="text-white/80" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`relative z-10 px-7 py-6 ${hasCustomDesign ? 'flex flex-1 items-center' : ''}`}
-            style={{
-              background: hasCustomDesign ? 'transparent' : bodyBackground,
-              color: config.textColor,
-            }}
-          >
-            {!hasCustomDesign && !isStrikeFrame && !isVectorShield && (
-              <>
-                <div className="absolute inset-y-0 left-0 w-2" style={{ backgroundColor: config.accentColor }} />
-                <div className="absolute left-5 top-5 h-[68px] w-[46px] rounded-lg border-2 border-black/10 bg-white/18" />
-                <div
-                  className="absolute left-7 top-7 h-[52px] w-1 rounded-full"
-                  style={{ backgroundColor: config.accentColor, boxShadow: `0 0 12px ${config.accentColor}` }}
-                />
-                <div className="absolute left-12 top-7 h-1.5 w-5 rounded-full bg-black/25" />
-                <div className="absolute left-12 top-14 h-1.5 w-8 rounded-full bg-black/20" />
-                <div className="absolute left-12 top-[68px] h-1.5 w-4 rounded-full bg-black/20" />
-              </>
-            )}
-            {!hasCustomDesign && isStrikeFrame && (
-              <div
-                className="absolute bottom-0 right-0 top-0 w-[300px] -skew-x-12 opacity-95"
-                style={{ backgroundColor: config.footerBg }}
-              />
-            )}
-            {!hasCustomDesign && isVectorShield && (
-              <>
-                <div
-                  className="absolute bottom-0 right-0 top-0 w-[250px] opacity-75"
-                  style={{ background: `linear-gradient(135deg, transparent 0%, ${config.accentColor}88 100%)` }}
-                />
-                <div className="absolute left-7 top-5 h-12 w-12 border-l-4 border-t-4" style={{ borderColor: config.accentColor }} />
-                <div className="absolute bottom-5 right-7 h-12 w-12 border-b-4 border-r-4" style={{ borderColor: config.accentColor }} />
-              </>
-            )}
-            <div className="flex items-center justify-between gap-6">
-              <div className="min-w-0">
-                <p
-                  className="text-[12px] font-[1000] uppercase tracking-[0.32em]"
-                  style={{ color: config.mutedTextColor }}
-                >
-                  Player
-                </p>
-                <h2 className="truncate text-[42px] font-[1000] uppercase leading-none">
-                  {target.player}
-                </h2>
-                <div className="mt-3 inline-flex items-center gap-2 rounded bg-black px-3 py-1.5">
-                  <span
-                    className="text-[12px] font-[1000] uppercase tracking-[0.16em]"
-                    style={{ color: config.accentColor }}
-                  >
-                    {target.team} / #{target.rank}
-                  </span>
-                </div>
-              </div>
-
-              <div className="relative z-30 w-[290px] shrink-0">
-                <div
-                  className="relative flex h-[174px] w-full items-end justify-center overflow-visible"
-                  style={{ clipPath: 'inset(-260px -260px -48px -260px)' }}
-                >
-                  {!hasCustomDesign && isStrikeFrame && (
-                    <div
-                      className="absolute right-10 h-[168px] w-[170px] rounded-full opacity-45 blur-sm"
-                      style={{ backgroundColor: config.accentColor }}
-                    />
-                  )}
-                  {!hasCustomDesign && isVectorShield && (
-                    <div
-                      className="absolute right-9 h-[174px] w-[174px] rounded-2xl border-4 opacity-70"
-                      style={{ borderColor: config.accentColor }}
-                    />
-                  )}
-                  <PlayerPhoto
-                    key={`${target.teamName}-${target.player}-${target.image || 'default'}`}
-                    src={target.image}
-                    mutedColor={config.mutedTextColor}
-                    accentColor={config.accentColor}
-                    x={config.playerImageX}
-                    y={config.playerImageY}
-                    scale={config.playerImageScale}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="relative z-10 flex items-center justify-between border-t-2 px-7 py-3"
-            style={{
-              backgroundColor: hasCustomDesign ? 'transparent' : config.footerBg,
-              borderColor: hasCustomDesign ? 'transparent' : 'rgb(0 0 0 / 0.1)',
-              clipPath: hasCustomDesign ? undefined : panelClipPath,
-            }}
-          >
-            {!hasCustomDesign && !isStrikeFrame && !isVectorShield && (
-              <div className="absolute inset-y-0 left-0 w-2" style={{ backgroundColor: config.accentColor }} />
-            )}
-            <div className="flex items-center gap-2">
-              <span
-                className="h-3 w-3 rounded-full"
-                style={{
-                  backgroundColor: config.accentColor,
-                  boxShadow: `0 0 14px ${config.accentColor}`,
-                }}
-              />
-              <span className="text-[11px] font-[1000] uppercase tracking-[0.26em] text-white">
-                Target locked
-              </span>
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.28em] text-white/70">
-              {target.teamName}
-            </span>
-          </div>
+          {renderDesign()}
         </motion.div>
       )}
     </AnimatePresence>

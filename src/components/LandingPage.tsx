@@ -16,7 +16,6 @@ interface LandingPageProps {
 const LandingPage: React.FC<LandingPageProps> = ({ globalLogo, ads }) => {
   const t = useT();
   const [activePopUpAd, setActivePopUpAd] = useState<Ad | null>(null);
-  const activeLandingAds = ads.filter(ad => ad.active && (!ad.displayLocation || ad.displayLocation === 'LANDING'));
 
   useEffect(() => {
     const popupAd = ads.find(a => a.active && a.displayLocation === 'LANDING_POPUP');
@@ -104,11 +103,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ globalLogo, ads }) => {
       </div>
 
       {/* Stats Card Preview / Ad Slider */}
-      {activeLandingAds.length > 0 && (
-        <div className="mt-16 md:mt-24 w-full max-w-5xl rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-b from-white/5 to-transparent aspect-video md:aspect-[21/9] relative group">
-          <AdSlider ads={ads} globalLogo={globalLogo} />
-        </div>
-      )}
+      <div className="mt-16 md:mt-24 w-full max-w-5xl rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-b from-white/5 to-transparent aspect-video md:aspect-[21/9] relative group">
+        <AdSlider ads={ads} globalLogo={globalLogo} />
+      </div>
 
       {/* --- PRICING SECTION --- */}
       <div id="pricing" className="mt-40 w-full max-w-6xl text-left">

@@ -4,21 +4,14 @@ import { notifyCompanionData } from '@/features/companion/overlayData';
 import { useSharedState } from '@/lib/useSharedState';
 import {
   DEFAULT_TERMINATOR_VISUAL,
-  TERMINATOR_DESIGN_PRESETS,
   TERMINATOR_CONFIG_KEY,
   TERMINATOR_COLOR_KEYS,
   TERMINATOR_COLOR_LABELS,
+  TERMINATOR_VISUAL_PRESETS,
   TERMINATOR_PLAYER_KILL_HISTORY_KEY,
-  applyTerminatorDesignPreset,
   clampTerminatorDisplaySeconds,
   clampTerminatorKillThreshold,
-  clampTerminatorPlayerImageScale,
-  clampTerminatorPosition,
-  clampTerminatorScale,
-  getTerminatorDesignPreset,
-  migrateTerminatorPlayerImageDefaults,
   terminatorPlayerKey,
-  type TerminatorDesignPresetId,
   type TerminatorPlayerKillHistory,
   type TerminatorVisualConfig,
 } from '@/features/games/pubg-mobile/logic/terminatorVisual';
@@ -196,7 +189,7 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
     activeTarget?.player === TERMINATOR_PREVIEW_TARGET.player && activeTarget.team === TERMINATOR_PREVIEW_TARGET.team;
 
   useEffect(() => {
-    setConfig((prev) => migrateTerminatorPlayerImageDefaults({ ...DEFAULT_TERMINATOR_VISUAL, ...prev }));
+    setConfig((prev) => ({ ...DEFAULT_TERMINATOR_VISUAL, ...prev }));
   }, [setConfig]);
 
   useEffect(() => {
@@ -213,10 +206,6 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
   }, [asset.id, companionProjectScope, config, visualOnly]);
 
   const threshold = clampTerminatorKillThreshold(config.killThreshold);
-  const presetDefaults = useMemo(
-    () => getTerminatorDesignPreset(config.designPreset).config,
-    [config.designPreset]
-  );
   const liveTargets = useMemo(
     () => collectTerminatorTargets(teams, threshold, projectPlayers, killHistory),
     [teams, threshold, projectPlayers, killHistory]
@@ -332,9 +321,20 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
     setConfig((prev) => ({ ...prev, [key]: value }));
   };
 
-  const applyDesignPreset = (presetId: TerminatorDesignPresetId) => {
-    setConfig((prev) => applyTerminatorDesignPreset(prev, presetId));
+  const applyVisualPreset = (presetId: string) => {
+    const preset = TERMINATOR_VISUAL_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    setConfig((prev) => ({
+      ...prev,
+      ...preset.config,
+    }));
   };
+
+  const activePresetId = TERMINATOR_VISUAL_PRESETS.find((preset) =>
+    Object.entries(preset.config).every(
+      ([key, value]) => config[key as keyof TerminatorVisualConfig] === value
+    )
+  )?.id;
 
   const renderHud = (scale = 1) => (
     <div
@@ -421,41 +421,37 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
             </div>
           </div>
 
-          <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
-            <FieldLabel>Default Design</FieldLabel>
-            <div className="grid grid-cols-1 gap-2">
-              {TERMINATOR_DESIGN_PRESETS.map((preset) => {
-                const isSelected =
-                  (config.designPreset ?? DEFAULT_TERMINATOR_VISUAL.designPreset) === preset.id &&
-                  !config.useCustomBackground;
-
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => applyDesignPreset(preset.id)}
-                    className={`rounded-lg border p-3 text-left transition-all ${
-                      isSelected
-                        ? 'border-[#ccff00] bg-[#ccff00]/10'
-                        : 'border-white/10 bg-black hover:border-white/25'
-                    }`}
-                  >
-                    <div
-                      className="mb-2 h-7 rounded border border-white/10"
-                      style={{
-                        background: `linear-gradient(110deg, ${preset.swatches[0]} 0%, ${preset.swatches[1]} 58%, ${preset.swatches[2]} 100%)`,
-                      }}
-                    />
-                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white">
-                      {preset.name}
-                    </div>
-                    <div className="mt-1 text-[9px] font-medium text-white/45">
-                      {preset.description}
-                    </div>
-                  </button>
-                );
-              })}
+          <div className="space-y-2">
+            <FieldLabel>Total Kill Counter</FieldLabel>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => updateConfig('killCounterSource', 'cumulative')}
+                className={`h-11 rounded-lg text-[10px] font-black uppercase leading-tight tracking-[0.12em] ${
+                  config.killCounterSource !== 'threshold'
+                    ? 'bg-[#ccff00] text-black'
+                    : 'border border-white/10 bg-black text-white/60'
+                }`}
+              >
+                Gabungan
+              </button>
+              <button
+                type="button"
+                onClick={() => updateConfig('killCounterSource', 'threshold')}
+                className={`h-11 rounded-lg text-[10px] font-black uppercase leading-tight tracking-[0.12em] ${
+                  config.killCounterSource === 'threshold'
+                    ? 'bg-[#ccff00] text-black'
+                    : 'border border-white/10 bg-black text-white/60'
+                }`}
+              >
+                Target Syarat
+              </button>
             </div>
+            <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-white/30">
+              {config.killCounterSource === 'threshold'
+                ? `Tampilkan target syarat (${threshold} kill)`
+                : 'Tampilkan total kill gabungan Match 1 → kini'}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -472,107 +468,6 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-2">
-              <FieldLabel>Scale (%)</FieldLabel>
-              <input
-                type="number"
-                value={clampTerminatorScale(config.scale) - presetDefaults.scale}
-                onChange={(event) =>
-                  updateConfig('scale', clampTerminatorScale(presetDefaults.scale + Number(event.target.value)))
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-white outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel>Pos X</FieldLabel>
-              <input
-                type="number"
-                value={clampTerminatorPosition(config.x, presetDefaults.x) - presetDefaults.x}
-                onChange={(event) =>
-                  updateConfig(
-                    'x',
-                    clampTerminatorPosition(presetDefaults.x + Number(event.target.value), presetDefaults.x)
-                  )
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-white outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel>Pos Y</FieldLabel>
-              <input
-                type="number"
-                value={clampTerminatorPosition(config.y, presetDefaults.y) - presetDefaults.y}
-                onChange={(event) =>
-                  updateConfig(
-                    'y',
-                    clampTerminatorPosition(presetDefaults.y + Number(event.target.value), presetDefaults.y)
-                  )
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-white outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel>Player X</FieldLabel>
-              <input
-                type="number"
-                value={
-                  clampTerminatorPosition(config.playerImageX, presetDefaults.playerImageX) -
-                  presetDefaults.playerImageX
-                }
-                onChange={(event) =>
-                  updateConfig(
-                    'playerImageX',
-                    clampTerminatorPosition(
-                      presetDefaults.playerImageX + Number(event.target.value),
-                      presetDefaults.playerImageX
-                    )
-                  )
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-white outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel>Player Y</FieldLabel>
-              <input
-                type="number"
-                value={
-                  clampTerminatorPosition(config.playerImageY, presetDefaults.playerImageY) -
-                  presetDefaults.playerImageY
-                }
-                onChange={(event) =>
-                  updateConfig(
-                    'playerImageY',
-                    clampTerminatorPosition(
-                      presetDefaults.playerImageY + Number(event.target.value),
-                      presetDefaults.playerImageY
-                    )
-                  )
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-white outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel>Player S (%)</FieldLabel>
-              <input
-                type="number"
-                value={
-                  clampTerminatorPlayerImageScale(config.playerImageScale) -
-                  presetDefaults.playerImageScale
-                }
-                onChange={(event) =>
-                  updateConfig(
-                    'playerImageScale',
-                    clampTerminatorPlayerImageScale(
-                      presetDefaults.playerImageScale + Number(event.target.value)
-                    )
-                  )
-                }
-                className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-center text-sm font-black text-[#ccff00] outline-none"
-              />
-            </div>
-          </div>
-
           <div className="space-y-2">
             <FieldLabel>Title</FieldLabel>
             <input
@@ -580,6 +475,59 @@ const OverlayTerminatorView: React.FC<OverlayTerminatorViewProps> = ({
               onChange={(event) => updateConfig('title', event.target.value.toUpperCase())}
               className="h-11 w-full rounded-lg border border-white/10 bg-black px-3 text-sm font-black uppercase tracking-[0.14em] text-white outline-none"
             />
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
+            <div className="flex items-center gap-2">
+              <Palette size={16} className="text-[#ccff00]" strokeWidth={3} />
+              <FieldLabel>Visual Preset</FieldLabel>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {TERMINATOR_VISUAL_PRESETS.map((preset) => {
+                const selected = activePresetId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyVisualPreset(preset.id)}
+                    className={`group relative min-h-[82px] overflow-hidden rounded-lg border p-3 text-left transition ${
+                      selected
+                        ? 'border-[#ccff00] bg-[#ccff00] text-black'
+                        : 'border-white/10 bg-white/5 text-white hover:border-white/25 hover:bg-white/10'
+                    }`}
+                    title={preset.description}
+                  >
+                    <div
+                      className="absolute inset-x-0 top-0 h-1"
+                      style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.accentColor }}
+                    />
+                    {preset.config.designVariant === 'terminator-a' ? (
+                      <div className="relative mb-2 h-8 overflow-hidden rounded border border-black/20" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.bodyBg }}>
+                        <span className="absolute inset-y-0 left-0 w-[38%]" style={{ backgroundColor: '#ADADAD' }} />
+                        <span className="absolute inset-y-0 left-[36%] w-[4%] skew-x-[-8deg]" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.headerBg }} />
+                        <span className="absolute right-0 top-0 h-full w-[12%]" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.accentColor }} />
+                      </div>
+                    ) : (
+                      <div className="mb-2 flex h-8 overflow-hidden rounded border border-black/20">
+                        <span className="h-full w-1/4" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.headerBg }} />
+                        <span className="flex-1" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.bodyBg }} />
+                        <span className="h-full w-1/5" style={{ backgroundColor: DEFAULT_TERMINATOR_VISUAL.footerBg }} />
+                      </div>
+                    )}
+                    <div className="text-[10px] font-black uppercase tracking-[0.14em]">
+                      {preset.name}
+                    </div>
+                    <div
+                      className={`mt-1 text-[9px] font-bold uppercase leading-snug tracking-[0.08em] ${
+                        selected ? 'text-black/60' : 'text-white/35'
+                      }`}
+                    >
+                      {preset.description}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

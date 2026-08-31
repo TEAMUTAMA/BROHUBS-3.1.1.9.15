@@ -1,0 +1,5 @@
+# BROHUBS — paksa LF untuk shell script & git hooks
+# Mencegah core.autocrlf mengubahnya ke CRLF (yang merusak shebang #!/bin/sh)
+*.sh                      text eol=lf
+.githooks/post-commit     text eol=lf
+.githooks/setup-hooks.sh  text eol=lf
