@@ -1120,7 +1120,10 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const eliminationsInitializedRef = useRef(false);
   const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
-  const [finalFourHoldPreview, setFinalFourHoldPreview] = useState(false);
+  const [finalFourHoldPreview, setFinalFourHoldPreview] = useSharedState<boolean>(
+    'BROHUBS_FINAL_FOUR_HOLD_PREVIEW',
+    false
+  );
   const [finalFourPreviewToProgram, setFinalFourPreviewToProgram] = useSharedState<boolean>('BROHUBS_FINAL_FOUR_PREVIEW_TO_PROGRAM', false);
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
@@ -1984,7 +1987,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
    *  Preview Sementara mengabaikan toggle overlay (sama seperti preview
    *  Elimination Banner & Terminator); jalur match asli tetap hormati showOverlay. */
   const showFinalFourTopBar =
-    (finalFourHoldPreview && (!visualOnly || finalFourPreviewToProgram)) ||
+    (finalFourHoldPreview && (!visualOnly || !programFeed || finalFourPreviewToProgram)) ||
     (showOverlay && isEndgamePhase && finalFourTopBarVisible);
 
   const soloExitDelayMs = resolveFinalFourSoloExitDelayMs(finalFourLayout.soloExitDelayMs);
@@ -2117,6 +2120,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
+  const [previewEliminationAlert, setPreviewEliminationAlert] = useState<TeamEliminationAlert | null>(null);
   const [elimBannerPreviewToProgram, setElimBannerPreviewToProgram] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
   const stagedElimCompanionPushedRef = useRef(false);
@@ -2216,13 +2220,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, [elimBannerHoldPreview, mutateElimBannerVisualDraft, setVisualConfig]);
 
   const clearPreviewEliminationState = useCallback(() => {
-    setEliminationAlert(null);
-    pushEliminationToCompanion(null);
+    setPreviewEliminationAlert(null);
+    if (elimBannerPreviewToProgram) pushEliminationToCompanion(null);
     if (eliminationClearTimerRef.current) {
       clearTimeout(eliminationClearTimerRef.current);
       eliminationClearTimerRef.current = null;
     }
-  }, [pushEliminationToCompanion, setEliminationAlert]);
+  }, [elimBannerPreviewToProgram, pushEliminationToCompanion]);
 
   const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert => {
     if (teams.length === 0) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
@@ -2248,7 +2252,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         elimBannerTuningLiveRef.current = { ...elimBannerLayout };
         stagedElimCompanionPushedRef.current = true;
         setFrozenStagedElimAlert(stagedAlert);
-        setEliminationAlert(stagedAlert);
+        setPreviewEliminationAlert(stagedAlert);
         setElimBannerHoldPreview(true);
         if (!visualOnly && elimBannerPreviewToProgram) {
           pushEliminationToCompanion(stagedAlert);
@@ -2309,7 +2313,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const displayElimAlert = elimBannerHoldPreview
     ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
-    : eliminationAlert;
+    : (previewEliminationAlert ?? eliminationAlert);
 
   const showEliminationBanner =
     elimBannerHoldPreview || (!isEndgamePhase && displayElimAlert !== null);
@@ -2522,13 +2526,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     if (elimBannerHoldPreview) return;
     const base = buildStagedElimPreviewAlert();
     const alert = { ...base, id: createEventId() };
-    setEliminationAlert(alert);
+    setPreviewEliminationAlert(alert);
     if (elimBannerPreviewToProgram) pushEliminationToCompanion(alert);
     if (eliminationClearTimerRef.current) {
       clearTimeout(eliminationClearTimerRef.current);
     }
     eliminationClearTimerRef.current = setTimeout(() => {
-      setEliminationAlert(null);
+      setPreviewEliminationAlert(null);
       if (elimBannerPreviewToProgram) pushEliminationToCompanion(null);
     }, 4000);
   }, [
@@ -2536,7 +2540,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     elimBannerHoldPreview,
     elimBannerPreviewToProgram,
     pushEliminationToCompanion,
-    setEliminationAlert,
+    setPreviewEliminationAlert,
   ]);
 
   useEffect(() => {
@@ -4068,15 +4072,19 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const terminatorBannerNode = useMemo(
-    () => (
-      <TerminatorBanner
-        target={terminatorVisual.previewHold && (!visualOnly || terminatorPreviewToProgram) ? TERMINATOR_PREVIEW_TARGET : activeTerminatorTarget}
-        config={terminatorVisual}
-        currentMatch={currentMatch}
-        forceShow={terminatorVisual.previewHold && (!visualOnly || terminatorPreviewToProgram)}
-      />
-    ),
-    [activeTerminatorTarget, currentMatch, terminatorVisual]
+    () => {
+      const allowPreview =
+        terminatorVisual.previewHold && (!visualOnly || !programFeed || terminatorPreviewToProgram);
+      return (
+        <TerminatorBanner
+          target={allowPreview ? TERMINATOR_PREVIEW_TARGET : activeTerminatorTarget}
+          config={{ ...terminatorVisual, previewHold: allowPreview }}
+          currentMatch={currentMatch}
+          forceShow={allowPreview}
+        />
+      );
+    },
+    [activeTerminatorTarget, currentMatch, programFeed, terminatorPreviewToProgram, terminatorVisual, visualOnly]
   );
 
   const resolvedFirstBloodTarget = useMemo(
@@ -4088,14 +4096,18 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const firstBloodBannerNode = useMemo(
-    () => (
-      <FirstBloodBanner
-        target={firstBloodVisual.previewHold && (!visualOnly || firstBloodPreviewToProgram) ? FIRST_BLOOD_PREVIEW_TARGET : resolvedFirstBloodTarget}
-        config={firstBloodVisual}
-        forceShow={firstBloodVisual.previewHold && (!visualOnly || firstBloodPreviewToProgram)}
-      />
-    ),
-    [firstBloodVisual, resolvedFirstBloodTarget]
+    () => {
+      const allowPreview =
+        firstBloodVisual.previewHold && (!visualOnly || !programFeed || firstBloodPreviewToProgram);
+      return (
+        <FirstBloodBanner
+          target={allowPreview ? FIRST_BLOOD_PREVIEW_TARGET : resolvedFirstBloodTarget}
+          config={{ ...firstBloodVisual, previewHold: allowPreview }}
+          forceShow={allowPreview}
+        />
+      );
+    },
+    [firstBloodPreviewToProgram, firstBloodVisual, programFeed, resolvedFirstBloodTarget, visualOnly]
   );
 
   const livePreviewContent = useMemo(
