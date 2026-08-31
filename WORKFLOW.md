@@ -25,4 +25,5 @@ Sebuah item hanya boleh dianggap selesai setelah:
 
 ## Waiting List saat ini
 
-1. MLBB Post-Match Overlay — menunggu instruksi untuk mulai.
+1. MLBB In-Game Overlay — prioritas berikutnya; scope detail ditentukan sebelum implementasi.
+2. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
