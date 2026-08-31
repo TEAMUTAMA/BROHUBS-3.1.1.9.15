@@ -1121,6 +1121,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
   const [finalFourHoldPreview, setFinalFourHoldPreview] = useState(false);
+  const [finalFourPreviewToProgram, setFinalFourPreviewToProgram] = useSharedState<boolean>('BROHUBS_FINAL_FOUR_PREVIEW_TO_PROGRAM', false);
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
   const [isTieBreakerModalOpen, setIsTieBreakerModalOpen] = useState(false);
@@ -1252,12 +1253,14 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     TERMINATOR_CONFIG_KEY,
     DEFAULT_TERMINATOR_VISUAL
   );
+  const [terminatorPreviewToProgram, setTerminatorPreviewToProgram] = useSharedState<boolean>('BROHUBS_TERMINATOR_PREVIEW_TO_PROGRAM', false);
   // Baseline "0" slider offset mengikuti design Terminator yang sedang dibuka.
   const terminatorBaseline = terminatorDesignBaseline(terminatorVisual.designVariant);
   const [firstBloodVisual, setFirstBloodVisual] = useSharedState<FirstBloodVisualConfig>(
     FIRST_BLOOD_CONFIG_KEY,
     DEFAULT_FIRST_BLOOD_VISUAL
   );
+  const [firstBloodPreviewToProgram, setFirstBloodPreviewToProgram] = useSharedState<boolean>('BROHUBS_FIRST_BLOOD_PREVIEW_TO_PROGRAM', false);
   const [firstBloodAlert, setFirstBloodAlert] = useSharedState<FirstBloodAlert | null>(
     FIRST_BLOOD_ALERT_KEY,
     null
@@ -1981,7 +1984,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
    *  Preview Sementara mengabaikan toggle overlay (sama seperti preview
    *  Elimination Banner & Terminator); jalur match asli tetap hormati showOverlay. */
   const showFinalFourTopBar =
-    finalFourHoldPreview || (showOverlay && isEndgamePhase && finalFourTopBarVisible);
+    (finalFourHoldPreview && (!visualOnly || finalFourPreviewToProgram)) ||
+    (showOverlay && isEndgamePhase && finalFourTopBarVisible);
 
   const soloExitDelayMs = resolveFinalFourSoloExitDelayMs(finalFourLayout.soloExitDelayMs);
 
@@ -2113,6 +2117,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
+  const [elimBannerPreviewToProgram, setElimBannerPreviewToProgram] = useState(false);
   const elimBannerHoldPreviewPrevRef = useRef(false);
   const stagedElimCompanionPushedRef = useRef(false);
   const [elimBannerTuningActive, setElimBannerTuningActive] = useState(false);
@@ -2131,7 +2136,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, []);
 
   const pushStagedElimBannerToCompanion = useCallback(() => {
-    if (visualOnly || !elimBannerHoldPreview) return;
+    if (visualOnly || !elimBannerHoldPreview || !elimBannerPreviewToProgram) return;
     const stagedAlert =
       frozenStagedElimAlert ??
       (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
@@ -2154,7 +2159,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   ]);
 
   const scheduleStagedElimBannerCompanionPush = useCallback(() => {
-    if (visualOnly || !elimBannerHoldPreview) return;
+    if (visualOnly || !elimBannerHoldPreview || !elimBannerPreviewToProgram) return;
     if (stagedCompanionPushTimerRef.current) return;
     stagedCompanionPushTimerRef.current = setTimeout(() => {
       stagedCompanionPushTimerRef.current = null;
@@ -2245,7 +2250,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         setFrozenStagedElimAlert(stagedAlert);
         setEliminationAlert(stagedAlert);
         setElimBannerHoldPreview(true);
-        if (!visualOnly) {
+        if (!visualOnly && elimBannerPreviewToProgram) {
           pushEliminationToCompanion(stagedAlert);
           syncCompanionData({
             assetId: asset.id,
@@ -2278,6 +2283,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       elimBannerLayout,
       visualConfig,
       visualOnly,
+      elimBannerPreviewToProgram,
     ]
   );
 
@@ -2517,17 +2523,18 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     const base = buildStagedElimPreviewAlert();
     const alert = { ...base, id: createEventId() };
     setEliminationAlert(alert);
-    pushEliminationToCompanion(alert);
+    if (elimBannerPreviewToProgram) pushEliminationToCompanion(alert);
     if (eliminationClearTimerRef.current) {
       clearTimeout(eliminationClearTimerRef.current);
     }
     eliminationClearTimerRef.current = setTimeout(() => {
       setEliminationAlert(null);
-      pushEliminationToCompanion(null);
+      if (elimBannerPreviewToProgram) pushEliminationToCompanion(null);
     }, 4000);
   }, [
     buildStagedElimPreviewAlert,
     elimBannerHoldPreview,
+    elimBannerPreviewToProgram,
     pushEliminationToCompanion,
     setEliminationAlert,
   ]);
@@ -2545,7 +2552,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       clearTimeout(eliminationClearTimerRef.current);
       eliminationClearTimerRef.current = null;
     }
-    if (visualOnly) return;
+    if (visualOnly || !elimBannerPreviewToProgram) return;
 
     if (!stagedElimCompanionPushedRef.current) {
       const alert = buildStagedElimPreviewAlert();
@@ -2558,6 +2565,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     elimBannerHoldPreview,
     buildStagedElimPreviewAlert,
     pushEliminationToCompanion,
+    elimBannerPreviewToProgram,
     visualOnly,
   ]);
 
@@ -2867,7 +2875,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   // Preview Sementara: sync layout/visual setelah scroll berhenti (tidak saat wheel aktif)
   useEffect(() => {
-    if (visualOnly || !elimBannerHoldPreview || elimBannerTuningActive) return;
+    if (visualOnly || !elimBannerHoldPreview || !elimBannerPreviewToProgram || elimBannerTuningActive) return;
     const stagedAlert =
       frozenStagedElimAlert ??
       (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
@@ -2887,6 +2895,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     asset.id,
     visualOnly,
     elimBannerHoldPreview,
+    elimBannerPreviewToProgram,
     elimBannerTuningActive,
     elimBannerLayout,
     visualConfig,
@@ -4061,10 +4070,10 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const terminatorBannerNode = useMemo(
     () => (
       <TerminatorBanner
-        target={terminatorVisual.previewHold ? TERMINATOR_PREVIEW_TARGET : activeTerminatorTarget}
+        target={terminatorVisual.previewHold && (!visualOnly || terminatorPreviewToProgram) ? TERMINATOR_PREVIEW_TARGET : activeTerminatorTarget}
         config={terminatorVisual}
         currentMatch={currentMatch}
-        forceShow={terminatorVisual.previewHold}
+        forceShow={terminatorVisual.previewHold && (!visualOnly || terminatorPreviewToProgram)}
       />
     ),
     [activeTerminatorTarget, currentMatch, terminatorVisual]
@@ -4081,9 +4090,9 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const firstBloodBannerNode = useMemo(
     () => (
       <FirstBloodBanner
-        target={firstBloodVisual.previewHold ? FIRST_BLOOD_PREVIEW_TARGET : resolvedFirstBloodTarget}
+        target={firstBloodVisual.previewHold && (!visualOnly || firstBloodPreviewToProgram) ? FIRST_BLOOD_PREVIEW_TARGET : resolvedFirstBloodTarget}
         config={firstBloodVisual}
-        forceShow={firstBloodVisual.previewHold}
+        forceShow={firstBloodVisual.previewHold && (!visualOnly || firstBloodPreviewToProgram)}
       />
     ),
     [firstBloodVisual, resolvedFirstBloodTarget]
@@ -5042,8 +5051,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      <span className="text-[7px] font-black uppercase tracking-widest">
                                        Preview Sementara
                                      </span>
-                                   </label>
-                                   </div>
+                                     </label>
+                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${elimBannerPreviewToProgram ? 'bg-orange-400/15 border-orange-400/50 text-orange-300' : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'}`}>
+                                      <input type="checkbox" checked={elimBannerPreviewToProgram} onChange={(e) => setElimBannerPreviewToProgram(e.target.checked)} className="rounded border-white/20 bg-black text-orange-400 focus:ring-orange-400" />
+                                      <Monitor size={10} />
+                                      <span className="text-[7px] font-black uppercase tracking-widest">Kirim ke PGM</span>
+                                    </label>
+                                    </div>
                                 </div>
                                 <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
                                   Geser <span className="text-zinc-400">seluruh banner eliminasi</span> di canvas
@@ -5529,8 +5543,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                                   className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00] scale-75"
                                                 />
                                                 <span className="text-[7px] text-zinc-500 uppercase">Tampil</span>
-                                              </label>
-                                            </div>
+                                    </label>
+                                    </div>
                                             <div className="grid grid-cols-3 gap-2">
                                               {fields.map(({ label, prop }) => (
                                                 <div key={prop}>
@@ -5722,11 +5736,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                        className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
                                      />
                                      <Eye size={10} />
-                                     <span className="text-[7px] font-black uppercase tracking-widest">
-                                       Preview Sementara
-                                     </span>
-                                   </label>
-                                   </div>
+                                      <span className="text-[7px] font-black uppercase tracking-widest">
+                                        Preview Sementara
+                                      </span>
+                                    </label>
+                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${terminatorPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" checked={terminatorPreviewToProgram} onChange={(e) => setTerminatorPreviewToProgram(e.target.checked)} />
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                    </label>
+                                    </div>
                                 </div>
 
                                 <div className="flex items-center justify-between gap-3 p-3 bg-black border border-white/10 rounded-xl mb-4">
@@ -6135,17 +6153,21 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      <input
                                        type="checkbox"
                                        checked={firstBloodVisual.previewHold}
-                                       onChange={(e) =>
-                                         patchFirstBloodVisual('previewHold', e.target.checked)
-                                       }
+                                        onChange={(e) =>
+                                          patchFirstBloodVisual('previewHold', e.target.checked)
+                                        }
                                        className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
                                      />
                                      <Eye size={10} />
-                                     <span className="text-[7px] font-black uppercase tracking-widest">
-                                       Preview Sementara
-                                     </span>
-                                   </label>
-                                   </div>
+                                      <span className="text-[7px] font-black uppercase tracking-widest">
+                                        Preview Sementara
+                                      </span>
+                                    </label>
+                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${firstBloodPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" checked={firstBloodPreviewToProgram} onChange={(e) => setFirstBloodPreviewToProgram(e.target.checked)} />
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                    </label>
+                                    </div>
                                 </div>
 
                                 <div className="flex items-center justify-between gap-3 p-3 bg-black border border-white/10 rounded-xl mb-4">
@@ -6833,16 +6855,20 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                    >
                                      <input
                                        type="checkbox"
-                                       checked={finalFourHoldPreview}
-                                       onChange={(e) => setFinalFourHoldPreview(e.target.checked)}
+                                        checked={finalFourHoldPreview}
+                                        onChange={(e) => setFinalFourHoldPreview(e.target.checked)}
                                        className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
                                      />
                                      <Eye size={10} />
-                                     <span className="text-[7px] font-black uppercase tracking-widest">
-                                       Preview Sementara
-                                     </span>
-                                   </label>
-                                   </div>
+                                      <span className="text-[7px] font-black uppercase tracking-widest">
+                                        Preview Sementara
+                                      </span>
+                                    </label>
+                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${finalFourPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" checked={finalFourPreviewToProgram} onChange={(e) => setFinalFourPreviewToProgram(e.target.checked)} />
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                    </label>
+                                    </div>
                                 </div>
                                 <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
                                   Bar WWCD muncul saat ≤4 tim tersisa · geser posisi di canvas 1920×1080.
