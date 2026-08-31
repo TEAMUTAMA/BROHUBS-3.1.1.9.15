@@ -380,9 +380,10 @@ const StandaloneProgramView: React.FC = () => {
     );
   }
 
-  const activeLayersCount = Object.values(programLayers).filter((assetId) => {
+  const activeLayersCount = routeAssetId
+    ? 1
+    : Object.values(programLayers).filter((assetId) => {
     if (!assetId) return false;
-    if (routeAssetId) return assetId === routeAssetId;
     return true;
   }).length;
 
@@ -410,7 +411,14 @@ const StandaloneProgramView: React.FC = () => {
           {programLayerSlots.map((layer) => {
             const layerNum = Number(layer);
             const assetId = programLayers[layerNum];
-            const visibleAssetId = assetId && (!routeAssetId || assetId === routeAssetId) ? assetId : null;
+            // URL output asset (/o/... atau ?asset=...) harus tetap terlihat saat
+            // dibuka dari perangkat lain seperti OBS/vMix. Program layer hanya
+            // mengatur tampilan ketika tidak ada asset yang ditentukan oleh URL.
+            const visibleAssetId = routeAssetId
+              ? layerNum === 1
+                ? routeAssetId
+                : null
+              : assetId;
             const layerPlayKey = layerPlayKeys[layerNum] ?? 0;
 
             return (

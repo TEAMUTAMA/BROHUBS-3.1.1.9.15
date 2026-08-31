@@ -8,7 +8,7 @@ import OverlayValTeamRosterView from '@/features/games/valorant/overlays/theme-0
 import OverlayMlbbTeamRosterView from '@/features/games/mobile-legends/overlays/theme-01/team-roster';
 import OverlayMlbbDrafNPickView from '@/features/games/mobile-legends/overlays/theme-01/draf-n-pick';
 import PanelControlMonitor from '@/features/companion/PanelControlMonitor';
-import { LayoutTemplate, Monitor, Settings2, ChevronDown, Gamepad2, Palette, Layers, Eye, EyeOff, Play, Square, Keyboard, Radio, Copy, Check, ExternalLink, HelpCircle, Info, X, ArrowLeft } from 'lucide-react';
+import { LayoutTemplate, Monitor, Settings2, ChevronDown, Gamepad2, Palette, Layers, Eye, EyeOff, Play, Square, Keyboard, Radio, Copy, Check, ExternalLink, HelpCircle, Info, X, ArrowLeft, GripVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSharedState } from '@/lib/useSharedState';
 import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey, getPreviewAssetKey, companionScopeMatches } from '@/features/companion/programLayers';
@@ -97,6 +97,11 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     true
   );
   const [assetLayerSelection, setAssetLayerSelection] = useSharedState<Record<string, number | null>>(`BROHUBS_STUDIO_ASSET_LAYERS_${project?.id || 'GLOBAL'}`, {});
+  const [assetCardOrder, setAssetCardOrder] = useSharedState<string[]>(
+    `BROHUBS_STUDIO_ASSET_CARD_ORDER_${project?.id || 'GLOBAL'}`,
+    []
+  );
+  const [draggedAssetId, setDraggedAssetId] = useState<string | null>(null);
   const [showList, setShowList] = useState(true);
   const [showMonitor, setShowMonitor] = useState(true);
   /** Play key per layer — untuk remount animasi internal (roster); di-bump sinkron saat take-to-air */
@@ -260,7 +265,15 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
         assets = project.deployedAssets || [];
     }
     return assets.filter(a => a.gameId === selectedGameId);
-}, [selectedGameId, project]);
+  }, [selectedGameId, project]);
+  const orderedSidebarAssets = useMemo(() => {
+    const assetsById = new Map(filteredAssets.map((asset) => [asset.id, asset]));
+    const savedAssets = assetCardOrder
+      .map((assetId) => assetsById.get(assetId))
+      .filter((asset): asset is Asset => Boolean(asset));
+    const savedIds = new Set(savedAssets.map((asset) => asset.id));
+    return [...savedAssets, ...filteredAssets.filter((asset) => !savedIds.has(asset.id))];
+  }, [assetCardOrder, filteredAssets]);
  
   // Sync selected game with project game ID
   useEffect(() => {
@@ -291,6 +304,26 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
       [assetId]: prev[assetId] === layer ? null : layer
     }));
   }, []);
+
+  const moveAssetCard = useCallback((draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+
+    setAssetCardOrder((previousOrder) => {
+      const knownIds = new Set(previousOrder);
+      const completeOrder = [
+        ...previousOrder,
+        ...filteredAssets.map((asset) => asset.id).filter((assetId) => !knownIds.has(assetId)),
+      ];
+      const fromIndex = completeOrder.indexOf(draggedId);
+      const targetIndex = completeOrder.indexOf(targetId);
+      if (fromIndex < 0 || targetIndex < 0) return completeOrder;
+
+      const nextOrder = [...completeOrder];
+      nextOrder.splice(fromIndex, 1);
+      nextOrder.splice(nextOrder.indexOf(targetId), 0, draggedId);
+      return nextOrder;
+    });
+  }, [filteredAssets, setAssetCardOrder]);
 
   const stopProgramAsset = useCallback((assetId: string) => {
     if (pendingProgramStopTimersRef.current[assetId]) {
@@ -1098,24 +1131,44 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
             >
               <h3 className="text-[7px] font-black text-zinc-700 tracking-[0.3em] uppercase mb-6 whitespace-nowrap italic">{t('gs.availableAssets')}</h3>
               <div className="space-y-2 whitespace-nowrap overflow-y-auto custom-scrollbar pr-2">
-                {filteredAssets.map((item) => (
+                {orderedSidebarAssets.map((item) => (
                   <div 
                     key={item.id} 
                     onClick={() => selectAssetForPreview(item.id)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer shadow-[0_4px_20px_rgba(0,0,0,0.3)] flex flex-col gap-3 ${
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', item.id);
+                      setDraggedAssetId(item.id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const sourceId = event.dataTransfer.getData('text/plain') || draggedAssetId;
+                      if (sourceId) moveAssetCard(sourceId, item.id);
+                      setDraggedAssetId(null);
+                    }}
+                    onDragEnd={() => setDraggedAssetId(null)}
+                    className={`p-4 rounded-xl border transition-all cursor-grab active:cursor-grabbing shadow-[0_4px_20px_rgba(0,0,0,0.3)] flex flex-col gap-3 ${
                       item.id === selectedAssetId 
                         ? 'border-[#ccff00]/40 bg-[#ccff00]/[0.03] shadow-[0_0_20px_rgba(204,255,0,0.05)]' 
                         : 'border-white/5 bg-zinc-900/10 hover:border-white/10 hover:bg-zinc-900/30'
-                    }`}
+                    } ${draggedAssetId === item.id ? 'opacity-45 scale-[0.98]' : ''}`}
                   >
                     {/* TOP SECTION: Name, Shortcut Indicator, Play Action */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0 flex flex-col gap-1">
-                        <h4 className={`text-[10px] font-black uppercase tracking-widest truncate ${
-                          item.id === selectedAssetId ? 'text-[#ccff00]' : 'text-zinc-200'
-                        }`}>
-                          {item.name}
-                        </h4>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <GripVertical size={13} className="shrink-0 text-zinc-600" aria-hidden="true" />
+                          <h4 className={`text-[10px] font-black uppercase tracking-widest truncate ${
+                            item.id === selectedAssetId ? 'text-[#ccff00]' : 'text-zinc-200'
+                          }`}>
+                            {item.name}
+                          </h4>
+                        </div>
                         
                         {/* KEYBOARD SHORTCUT BADGE / CONFIG BUTTON */}
                         <div className="flex items-center gap-1.5 mt-0.5">

@@ -25,9 +25,10 @@ Sebuah item hanya boleh dianggap selesai setelah:
 
 ## Pekerjaan aktif
 
-- Rapikan Template PUBG Overall Ranking — Terminator hanya menjadi fitur Visual Overall Ranking, bukan asset mandiri.
+- Atur ulang kartu asset di panel kiri Global Studio dengan drag-and-drop, lalu lanjutkan pematangan asset dan uji output lokal.
 
 ## Waiting List saat ini
 
 1. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
 2. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
+3. Integrasi Supabase Realtime untuk Control Desk dan output publik (Vercel/domain sendiri) setelah asset dan uji lokal stabil.
