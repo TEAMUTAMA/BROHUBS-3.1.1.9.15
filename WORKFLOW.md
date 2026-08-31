@@ -32,11 +32,12 @@ Sebuah item hanya boleh dianggap selesai setelah:
 
 ## Pekerjaan aktif
 
-- Tambahkan tombol simulasi Preview di Monitor PGM untuk Overall Ranking tanpa mengubah Play otomatis atau output live.
+- Perbaiki regresi UI kontrol Preview To PGM pada PUBG Overall Ranking untuk Elimination Banner, Final Four WWCD, Terminator, dan First Blood.
 
 ## Waiting List saat ini
 
-1. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
-2. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
-3. Integrasi Supabase Realtime untuk Control Desk dan output publik (Vercel/domain sendiri) setelah asset dan uji lokal stabil.
-4. Audit seluruh teks UI dan pastikan semuanya diterjemahkan melalui sistem bahasa sesuai pengaturan pengguna.
+1. Validasi end-to-end PUBG Overall Ranking untuk matriks Preview Sementara dan Preview To PGM pada Elimination Banner, Final Four WWCD, Terminator, dan First Blood—mencakup Monitor Preview, Monitor PGM, serta output OBS/vMix. Lanjutkan tanpa commit/push sampai pengguna meminta.
+2. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
+3. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
+4. Integrasi Supabase Realtime untuk Control Desk dan output publik (Vercel/domain sendiri) setelah asset dan uji lokal stabil.
+5. Audit seluruh teks UI dan pastikan semuanya diterjemahkan melalui sistem bahasa sesuai pengaturan pengguna.

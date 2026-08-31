@@ -127,6 +127,27 @@ interface EliminationBannerLayout {
 }
 
 const STAGED_ELIM_PREVIEW_ALERT_ID = 'brohubs-elim-banner-staged-preview';
+const OVERALL_RANKING_LOCAL_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_LOCAL_PREVIEW';
+const OVERALL_RANKING_PROGRAM_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_PROGRAM_PREVIEW';
+
+/**
+ * Kanal preview hanya untuk monitor di browser operator. Ia sengaja terpisah
+ * dari state visual/live dan tidak pernah dikirim ke companion kecuali saat
+ * operator secara eksplisit memilih Kirim ke PGM.
+ */
+interface OverallRankingLocalPreviewState {
+  elimination: { active: boolean; toProgram: boolean; token: number };
+  finalFour: { active: boolean; toProgram: boolean; token: number };
+  terminator: { active: boolean; toProgram: boolean; token: number };
+  firstBlood: { active: boolean; toProgram: boolean; token: number };
+}
+
+const DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW: OverallRankingLocalPreviewState = {
+  elimination: { active: false, toProgram: false, token: 0 },
+  finalFour: { active: false, toProgram: false, token: 0 },
+  terminator: { active: false, toProgram: false, token: 0 },
+  firstBlood: { active: false, toProgram: false, token: 0 },
+};
 
 /** Data contoh saat belum ada tim / eliminasi di klasemen */
 const STAGED_FINAL_FOUR_PREVIEW_DATA = [
@@ -1120,11 +1141,46 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const eliminationsInitializedRef = useRef(false);
   const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
-  const [finalFourHoldPreview, setFinalFourHoldPreview] = useSharedState<boolean>(
-    'BROHUBS_FINAL_FOUR_HOLD_PREVIEW',
-    false
+  const [localPreview, setLocalPreview] = useSharedState<OverallRankingLocalPreviewState>(
+    OVERALL_RANKING_LOCAL_PREVIEW_KEY,
+    DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
   );
-  const [finalFourPreviewToProgram, setFinalFourPreviewToProgram] = useSharedState<boolean>('BROHUBS_FINAL_FOUR_PREVIEW_TO_PROGRAM', false);
+  const [programPreview] = useSharedState<OverallRankingLocalPreviewState>(
+    OVERALL_RANKING_PROGRAM_PREVIEW_KEY,
+    DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
+  );
+  // Output OBS/vMix hanya membaca kanal PGM, sedangkan control desk dan
+  // Monitor Preview tetap membaca preview lokal operator.
+  const previewState = visualOnly && programFeed && companionProjectScope
+    ? programPreview
+    : localPreview;
+  const previousProgramPreviewRef = useRef(false);
+  useEffect(() => {
+    if (visualOnly) return;
+    const programPreview: OverallRankingLocalPreviewState = {
+      elimination: { ...localPreview.elimination, active: localPreview.elimination.active && localPreview.elimination.toProgram },
+      finalFour: { ...localPreview.finalFour, active: localPreview.finalFour.active && localPreview.finalFour.toProgram },
+      terminator: { ...localPreview.terminator, active: localPreview.terminator.active && localPreview.terminator.toProgram },
+      firstBlood: { ...localPreview.firstBlood, active: localPreview.firstBlood.active && localPreview.firstBlood.toProgram },
+    };
+    const hasProgramPreview = Object.values(programPreview).some((preview) => preview.active);
+    if (!hasProgramPreview && !previousProgramPreviewRef.current) return;
+    previousProgramPreviewRef.current = hasProgramPreview;
+    syncCompanionData({
+      assetId: asset.id,
+      data: { [OVERALL_RANKING_PROGRAM_PREVIEW_KEY]: programPreview },
+    });
+  }, [asset.id, localPreview, syncCompanionData, visualOnly]);
+  const finalFourHoldPreview = previewState.finalFour.active;
+  const finalFourPreviewToProgram = previewState.finalFour.toProgram;
+  const setFinalFourHoldPreview = useCallback(
+    (active: boolean) => setLocalPreview((prev) => ({ ...prev, finalFour: { ...prev.finalFour, active } })),
+    [setLocalPreview]
+  );
+  const setFinalFourPreviewToProgram = useCallback(
+    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, finalFour: { ...prev.finalFour, toProgram } })),
+    [setLocalPreview]
+  );
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
   const [isTieBreakerModalOpen, setIsTieBreakerModalOpen] = useState(false);
@@ -1256,14 +1312,32 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     TERMINATOR_CONFIG_KEY,
     DEFAULT_TERMINATOR_VISUAL
   );
-  const [terminatorPreviewToProgram, setTerminatorPreviewToProgram] = useSharedState<boolean>('BROHUBS_TERMINATOR_PREVIEW_TO_PROGRAM', false);
+  const terminatorPreviewActive = previewState.terminator.active;
+  const terminatorPreviewToProgram = previewState.terminator.toProgram;
+  const setTerminatorPreviewActive = useCallback(
+    (active: boolean) => setLocalPreview((prev) => ({ ...prev, terminator: { ...prev.terminator, active } })),
+    [setLocalPreview]
+  );
+  const setTerminatorPreviewToProgram = useCallback(
+    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, terminator: { ...prev.terminator, toProgram } })),
+    [setLocalPreview]
+  );
   // Baseline "0" slider offset mengikuti design Terminator yang sedang dibuka.
   const terminatorBaseline = terminatorDesignBaseline(terminatorVisual.designVariant);
   const [firstBloodVisual, setFirstBloodVisual] = useSharedState<FirstBloodVisualConfig>(
     FIRST_BLOOD_CONFIG_KEY,
     DEFAULT_FIRST_BLOOD_VISUAL
   );
-  const [firstBloodPreviewToProgram, setFirstBloodPreviewToProgram] = useSharedState<boolean>('BROHUBS_FIRST_BLOOD_PREVIEW_TO_PROGRAM', false);
+  const firstBloodPreviewActive = previewState.firstBlood.active;
+  const firstBloodPreviewToProgram = previewState.firstBlood.toProgram;
+  const setFirstBloodPreviewActive = useCallback(
+    (active: boolean) => setLocalPreview((prev) => ({ ...prev, firstBlood: { ...prev.firstBlood, active } })),
+    [setLocalPreview]
+  );
+  const setFirstBloodPreviewToProgram = useCallback(
+    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, firstBlood: { ...prev.firstBlood, toProgram } })),
+    [setLocalPreview]
+  );
   const [firstBloodAlert, setFirstBloodAlert] = useSharedState<FirstBloodAlert | null>(
     FIRST_BLOOD_ALERT_KEY,
     null
@@ -1273,20 +1347,25 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const [activeFirstBloodTarget, setActiveFirstBloodTarget] = useState<FirstBloodTarget | null>(null);
   const [activeTerminatorTarget, setActiveTerminatorTarget] = useState<TerminatorTarget | null>(null);
   const firstBloodHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFirstBloodPreviewTokenRef = useRef(firstBloodVisual.previewToken ?? 0);
+  const lastFirstBloodPreviewTokenRef = useRef(previewState.firstBlood.token);
   const lastFirstBloodAlertTokenRef = useRef(firstBloodAlert?.token ?? 0);
   const firstBloodTriggeredMatchRef = useRef<number | null>(null);
   const firstBloodTotalKillsRef = useRef<number | null>(null);
   const firstBloodPlayerKillsSnapshotRef = useRef<Map<string, number>>(new Map());
   const terminatorHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTerminatorPreviewTokenRef = useRef(terminatorVisual.previewToken ?? 0);
+  const lastTerminatorPreviewTokenRef = useRef(previewState.terminator.token);
   const triggeredTerminatorKeysRef = useRef<Set<string>>(new Set());
   const terminatorKillSnapshotRef = useRef<Map<string, { kills: number; cumulativeKills: number }>>(new Map());
   const pendingTerminatorTargetsRef = useRef<TerminatorTarget[]>([]);
   const terminatorThreshold = clampTerminatorKillThreshold(terminatorVisual.killThreshold);
 
   useEffect(() => {
-    setTerminatorVisual((prev) => ({ ...DEFAULT_TERMINATOR_VISUAL, ...prev }));
+    setTerminatorVisual((prev) => ({
+      ...DEFAULT_TERMINATOR_VISUAL,
+      ...prev,
+      // Preview sekarang berada di kanal lokal khusus, bukan konfigurasi live.
+      previewHold: false,
+    }));
   }, [setTerminatorVisual]);
 
   useEffect(() => {
@@ -1300,6 +1379,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
           merged.headerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.headerBg : merged.headerBg,
         footerBg:
           merged.footerBg === '#7f1d1d' ? DEFAULT_FIRST_BLOOD_VISUAL.footerBg : merged.footerBg,
+        // Bersihkan flag lama agar tidak dapat mengaktifkan preview dari state live.
+        previewHold: false,
       };
     });
   }, [setFirstBloodVisual]);
@@ -1419,7 +1500,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     firstBloodTotalKillsRef.current = nextTotalKills;
 
     if (previousTotalKills === null) return;
-    if (!firstBloodVisual.enabled || firstBloodVisual.previewHold) return;
+    if (!firstBloodVisual.enabled) return;
     if (firstBloodTriggeredMatchRef.current === currentMatch) return;
     if (previousTotalKills !== 0 || nextTotalKills <= 0 || !firstIncreasedRef) return;
 
@@ -1430,7 +1511,6 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, [
     currentMatch,
     firstBloodVisual.enabled,
-    firstBloodVisual.previewHold,
     publishFirstBloodTarget,
     projectPlayers,
     teams,
@@ -1453,7 +1533,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, [currentMatch, clearFirstBloodHideTimer]);
 
   useEffect(() => {
-    if (!terminatorVisual.enabled || terminatorVisual.previewHold || liveTerminatorTargets.length === 0) {
+    if (!terminatorVisual.enabled || liveTerminatorTargets.length === 0) {
       return;
     }
     const nextTargets = liveTerminatorTargets.filter((target) => {
@@ -1488,28 +1568,27 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     terminatorTargetKey,
     terminatorThreshold,
     terminatorVisual.enabled,
-    terminatorVisual.previewHold,
   ]);
 
   useEffect(() => {
-    if (activeTerminatorTarget || terminatorVisual.previewHold || !terminatorVisual.enabled) return;
+    if (activeTerminatorTarget || !terminatorVisual.enabled) return;
     const nextTarget = pendingTerminatorTargetsRef.current.shift();
     if (nextTarget) showTerminatorTarget(nextTarget);
-  }, [activeTerminatorTarget, showTerminatorTarget, terminatorVisual.enabled, terminatorVisual.previewHold]);
+  }, [activeTerminatorTarget, showTerminatorTarget, terminatorVisual.enabled]);
 
   useEffect(() => {
-    const previewToken = terminatorVisual.previewToken ?? 0;
+    const previewToken = previewState.terminator.token;
     if (!previewToken || lastTerminatorPreviewTokenRef.current === previewToken) return;
     lastTerminatorPreviewTokenRef.current = previewToken;
     showTerminatorTarget(TERMINATOR_PREVIEW_TARGET);
-  }, [showTerminatorTarget, terminatorVisual.previewToken]);
+  }, [previewState.terminator.token, showTerminatorTarget]);
 
   useEffect(() => {
-    const previewToken = firstBloodVisual.previewToken ?? 0;
+    const previewToken = previewState.firstBlood.token;
     if (!previewToken || lastFirstBloodPreviewTokenRef.current === previewToken) return;
     lastFirstBloodPreviewTokenRef.current = previewToken;
     showFirstBloodTarget(FIRST_BLOOD_PREVIEW_TARGET);
-  }, [firstBloodVisual.previewToken, showFirstBloodTarget]);
+  }, [previewState.firstBlood.token, showFirstBloodTarget]);
 
   useEffect(() => {
     const token = firstBloodAlert?.token ?? 0;
@@ -1670,16 +1749,16 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const previewTerminatorBanner = () => {
-    setTerminatorVisual((prev) => ({
+    setLocalPreview((prev) => ({
       ...prev,
-      previewToken: Date.now(),
+      terminator: { ...prev.terminator, token: Date.now() },
     }));
   };
 
   const previewFirstBloodBanner = () => {
-    setFirstBloodVisual((prev) => ({
+    setLocalPreview((prev) => ({
       ...prev,
-      previewToken: Date.now(),
+      firstBlood: { ...prev.firstBlood, token: Date.now() },
     }));
   };
 
@@ -1982,12 +2061,14 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   /** Fase endgame (≤4 tim): panel kanan OUT bersamaan dengan bar Final Four IN. */
   const isEndgamePhase = isEndgameTopOverlayCount(survivingMatchCount);
-  const showOverallRankingPanel = showOverlay && !isEndgamePhase && !finalFourHoldPreview;
+  const finalFourPreviewVisible =
+    finalFourHoldPreview && (!visualOnly || !programFeed || finalFourPreviewToProgram);
+  const showOverallRankingPanel = showOverlay && !isEndgamePhase && !finalFourPreviewVisible;
   /** Bar WWCD atas — saat 1 tim: tahan lalu transisi keluar.
    *  Preview Sementara mengabaikan toggle overlay (sama seperti preview
    *  Elimination Banner & Terminator); jalur match asli tetap hormati showOverlay. */
   const showFinalFourTopBar =
-    (finalFourHoldPreview && (!visualOnly || !programFeed || finalFourPreviewToProgram)) ||
+    finalFourPreviewVisible ||
     (showOverlay && isEndgamePhase && finalFourTopBarVisible);
 
   const soloExitDelayMs = resolveFinalFourSoloExitDelayMs(finalFourLayout.soloExitDelayMs);
@@ -2119,11 +2200,19 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [buildTeamEliminationAlert, playNextEliminationBanner]
   );
 
-  const [elimBannerHoldPreview, setElimBannerHoldPreview] = useState(false);
+  const elimBannerHoldPreview = previewState.elimination.active;
+  const elimBannerPreviewToProgram = previewState.elimination.toProgram;
+  const setElimBannerHoldPreview = useCallback(
+    (active: boolean) => setLocalPreview((prev) => ({ ...prev, elimination: { ...prev.elimination, active } })),
+    [setLocalPreview]
+  );
+  const setElimBannerPreviewToProgram = useCallback(
+    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, elimination: { ...prev.elimination, toProgram } })),
+    [setLocalPreview]
+  );
   const [previewEliminationAlert, setPreviewEliminationAlert] = useState<TeamEliminationAlert | null>(null);
-  const [elimBannerPreviewToProgram, setElimBannerPreviewToProgram] = useState(false);
+  const previewEliminationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const elimBannerHoldPreviewPrevRef = useRef(false);
-  const stagedElimCompanionPushedRef = useRef(false);
   const [elimBannerTuningActive, setElimBannerTuningActive] = useState(false);
   const elimBannerWheelTuningRef = useRef(false);
   const elimBannerFocusTuningRef = useRef(false);
@@ -2141,16 +2230,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const pushStagedElimBannerToCompanion = useCallback(() => {
     if (visualOnly || !elimBannerHoldPreview || !elimBannerPreviewToProgram) return;
-    const stagedAlert =
-      frozenStagedElimAlert ??
-      (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
-      STAGED_ELIM_PREVIEW_FALLBACK;
     syncCompanionData({
       assetId: asset.id,
       data: {
         BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerTuningLiveRef.current,
         BROHUBS_LEADERBOARD_VISUAL: visualConfig,
-        [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
       },
     });
   }, [
@@ -2158,8 +2242,6 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     visualOnly,
     elimBannerHoldPreview,
     visualConfig,
-    frozenStagedElimAlert,
-    eliminationAlert,
   ]);
 
   const scheduleStagedElimBannerCompanionPush = useCallback(() => {
@@ -2221,12 +2303,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const clearPreviewEliminationState = useCallback(() => {
     setPreviewEliminationAlert(null);
-    if (elimBannerPreviewToProgram) pushEliminationToCompanion(null);
-    if (eliminationClearTimerRef.current) {
-      clearTimeout(eliminationClearTimerRef.current);
-      eliminationClearTimerRef.current = null;
+    if (previewEliminationClearTimerRef.current) {
+      clearTimeout(previewEliminationClearTimerRef.current);
+      previewEliminationClearTimerRef.current = null;
     }
-  }, [elimBannerPreviewToProgram, pushEliminationToCompanion]);
+  }, []);
 
   const buildStagedElimPreviewAlert = useCallback((): TeamEliminationAlert => {
     if (teams.length === 0) return { ...STAGED_ELIM_PREVIEW_FALLBACK };
@@ -2244,27 +2325,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const setElimBannerHoldPreviewSafe = useCallback(
     (on: boolean) => {
       if (on) {
-        if (eliminationClearTimerRef.current) {
-          clearTimeout(eliminationClearTimerRef.current);
-          eliminationClearTimerRef.current = null;
-        }
         const stagedAlert = buildStagedElimPreviewAlert();
         elimBannerTuningLiveRef.current = { ...elimBannerLayout };
-        stagedElimCompanionPushedRef.current = true;
         setFrozenStagedElimAlert(stagedAlert);
         setPreviewEliminationAlert(stagedAlert);
         setElimBannerHoldPreview(true);
-        if (!visualOnly && elimBannerPreviewToProgram) {
-          pushEliminationToCompanion(stagedAlert);
-          syncCompanionData({
-            assetId: asset.id,
-            data: {
-              BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
-              BROHUBS_LEADERBOARD_VISUAL: visualConfig,
-              [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
-            },
-          });
-        }
         return;
       }
       if (stagedCompanionPushTimerRef.current) {
@@ -2274,20 +2339,12 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       elimBannerWheelTuningRef.current = false;
       elimBannerFocusTuningRef.current = false;
       setElimBannerTuningActive(false);
-      stagedElimCompanionPushedRef.current = false;
       setElimBannerHoldPreview(false);
       clearPreviewEliminationState();
     },
     [
       buildStagedElimPreviewAlert,
       clearPreviewEliminationState,
-      pushEliminationToCompanion,
-      setEliminationAlert,
-      asset.id,
-      elimBannerLayout,
-      visualConfig,
-      visualOnly,
-      elimBannerPreviewToProgram,
     ]
   );
 
@@ -2311,12 +2368,14 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     }
   }, [elimBannerHoldPreview]);
 
+  const elimBannerPreviewVisible =
+    elimBannerHoldPreview && (!visualOnly || !programFeed || elimBannerPreviewToProgram);
   const displayElimAlert = elimBannerHoldPreview
     ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
     : (previewEliminationAlert ?? eliminationAlert);
 
   const showEliminationBanner =
-    elimBannerHoldPreview || (!isEndgamePhase && displayElimAlert !== null);
+    elimBannerPreviewVisible || (!isEndgamePhase && displayElimAlert !== null);
 
   useEffect(() => {
     if (!isEndgamePhase || elimBannerHoldPreview) return;
@@ -2527,19 +2586,16 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     const base = buildStagedElimPreviewAlert();
     const alert = { ...base, id: createEventId() };
     setPreviewEliminationAlert(alert);
-    if (elimBannerPreviewToProgram) pushEliminationToCompanion(alert);
-    if (eliminationClearTimerRef.current) {
-      clearTimeout(eliminationClearTimerRef.current);
+    if (previewEliminationClearTimerRef.current) {
+      clearTimeout(previewEliminationClearTimerRef.current);
     }
-    eliminationClearTimerRef.current = setTimeout(() => {
+    previewEliminationClearTimerRef.current = setTimeout(() => {
       setPreviewEliminationAlert(null);
-      if (elimBannerPreviewToProgram) pushEliminationToCompanion(null);
+      previewEliminationClearTimerRef.current = null;
     }, 4000);
   }, [
     buildStagedElimPreviewAlert,
     elimBannerHoldPreview,
-    elimBannerPreviewToProgram,
-    pushEliminationToCompanion,
     setPreviewEliminationAlert,
   ]);
 
@@ -2552,25 +2608,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     }
 
     elimBannerHoldPreviewPrevRef.current = true;
-    if (eliminationClearTimerRef.current) {
-      clearTimeout(eliminationClearTimerRef.current);
-      eliminationClearTimerRef.current = null;
-    }
-    if (visualOnly || !elimBannerPreviewToProgram) return;
-
-    if (!stagedElimCompanionPushedRef.current) {
-      const alert = buildStagedElimPreviewAlert();
-      if (alert) {
-        pushEliminationToCompanion(alert);
-        stagedElimCompanionPushedRef.current = true;
-      }
-    }
   }, [
     elimBannerHoldPreview,
-    buildStagedElimPreviewAlert,
-    pushEliminationToCompanion,
-    elimBannerPreviewToProgram,
-    visualOnly,
   ]);
 
   useEffect(() => {
@@ -2864,7 +2903,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   ]);
 
   useEffect(() => {
-    if (visualOnly || !finalFourHoldPreview) return;
+    if (visualOnly || !finalFourHoldPreview || !finalFourPreviewToProgram) return;
     const timer = setTimeout(() => {
       syncCompanionData({
         assetId: asset.id,
@@ -2875,22 +2914,17 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       });
     }, 380);
     return () => clearTimeout(timer);
-  }, [asset.id, visualOnly, finalFourHoldPreview, visualConfig, finalFourLayout]);
+  }, [asset.id, visualOnly, finalFourHoldPreview, finalFourPreviewToProgram, visualConfig, finalFourLayout]);
 
   // Preview Sementara: sync layout/visual setelah scroll berhenti (tidak saat wheel aktif)
   useEffect(() => {
     if (visualOnly || !elimBannerHoldPreview || !elimBannerPreviewToProgram || elimBannerTuningActive) return;
-    const stagedAlert =
-      frozenStagedElimAlert ??
-      (eliminationAlert?.id === STAGED_ELIM_PREVIEW_ALERT_ID ? eliminationAlert : null) ??
-      STAGED_ELIM_PREVIEW_FALLBACK;
     const timer = setTimeout(() => {
       syncCompanionData({
         assetId: asset.id,
         data: {
           BROHUBS_ELIMINATION_BANNER_LAYOUT: elimBannerLayout,
           BROHUBS_LEADERBOARD_VISUAL: visualConfig,
-          [TEAM_ELIMINATION_ALERT_KEY]: stagedAlert,
         },
       });
     }, 380);
@@ -2903,8 +2937,6 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     elimBannerTuningActive,
     elimBannerLayout,
     visualConfig,
-    frozenStagedElimAlert,
-    eliminationAlert,
   ]);
 
   const handleResetCurrentMatch = () => {
@@ -3961,7 +3993,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     contentionCount,
   ]);
 
-  const effectiveFinalFourTeamsData = finalFourHoldPreview
+  const effectiveFinalFourTeamsData = finalFourPreviewVisible
     ? [...STAGED_FINAL_FOUR_PREVIEW_DATA]
     : finalFourTeamsData;
 
@@ -3979,7 +4011,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const finalFourOverlayPanel = useMemo(() => {
     if (
-      (!finalFourHoldPreview && (!showOverlay || !isEndgamePhase)) ||
+      (!finalFourPreviewVisible && (!showOverlay || !isEndgamePhase)) ||
       effectiveFinalFourTeamsData.length === 0
     ) {
       return null;
@@ -4041,7 +4073,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, [
     showOverlay,
     isEndgamePhase,
-    finalFourHoldPreview,
+    finalFourPreviewVisible,
     effectiveFinalFourTeamsData,
     finalFourLayout,
     visualConfig,
@@ -4074,7 +4106,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const terminatorBannerNode = useMemo(
     () => {
       const allowPreview =
-        terminatorVisual.previewHold && (!visualOnly || !programFeed || terminatorPreviewToProgram);
+        terminatorPreviewActive && (!visualOnly || !programFeed || terminatorPreviewToProgram);
       return (
         <TerminatorBanner
           target={allowPreview ? TERMINATOR_PREVIEW_TARGET : activeTerminatorTarget}
@@ -4084,7 +4116,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         />
       );
     },
-    [activeTerminatorTarget, currentMatch, programFeed, terminatorPreviewToProgram, terminatorVisual, visualOnly]
+    [activeTerminatorTarget, currentMatch, programFeed, terminatorPreviewActive, terminatorPreviewToProgram, terminatorVisual, visualOnly]
   );
 
   const resolvedFirstBloodTarget = useMemo(
@@ -4098,7 +4130,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const firstBloodBannerNode = useMemo(
     () => {
       const allowPreview =
-        firstBloodVisual.previewHold && (!visualOnly || !programFeed || firstBloodPreviewToProgram);
+        firstBloodPreviewActive && (!visualOnly || !programFeed || firstBloodPreviewToProgram);
       return (
         <FirstBloodBanner
           target={allowPreview ? FIRST_BLOOD_PREVIEW_TARGET : resolvedFirstBloodTarget}
@@ -4107,7 +4139,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         />
       );
     },
-    [firstBloodPreviewToProgram, firstBloodVisual, programFeed, resolvedFirstBloodTarget, visualOnly]
+    [firstBloodPreviewActive, firstBloodPreviewToProgram, firstBloodVisual, programFeed, resolvedFirstBloodTarget, visualOnly]
   );
 
   const livePreviewContent = useMemo(
@@ -5027,7 +5059,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                            ? 'text-zinc-700 cursor-not-allowed'
                                            : 'text-zinc-500 hover:text-[#ccff00]'
                                        }`}
-                                       title={elimBannerHoldPreview ? 'Matikan Preview Sementara dulu' : undefined}
+                                       title={elimBannerHoldPreview ? t('olb.disablePreviewFirst') : undefined}
                                      >
                                        <Play size={10} /> {t('olb.preview')}
                                      </button>
@@ -5061,13 +5093,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      />
                                      <Eye size={10} />
                                      <span className="text-[7px] font-black uppercase tracking-widest">
-                                       Preview Sementara
+                                       {t('olb.previewTemporary')}
                                      </span>
                                      </label>
-                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${elimBannerPreviewToProgram ? 'bg-orange-400/15 border-orange-400/50 text-orange-300' : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'}`}>
+                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${elimBannerPreviewToProgram ? 'bg-orange-400/15 border-orange-400/50 text-orange-300' : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'}`}>
                                       <input type="checkbox" checked={elimBannerPreviewToProgram} onChange={(e) => setElimBannerPreviewToProgram(e.target.checked)} className="rounded border-white/20 bg-black text-orange-400 focus:ring-orange-400" />
                                       <Monitor size={10} />
-                                      <span className="text-[7px] font-black uppercase tracking-widest">Kirim ke PGM</span>
+                                      <span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
                                 </div>
@@ -5076,7 +5108,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                   1920×1080 · POS X positif = kanan · bukan LAYOUT TRANSFORM Overall Ranking di atas.
                                   {elimBannerHoldPreview ? (
                                     <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
-                                      Preview aktif — angka UI adalah offset dari posisi default. Scroll atau Arrow Up/Down di kolom angka (Shift = ±10), bisa juga klik lalu ketik. Perubahan langsung ke Monitor Preview / Program &amp; Link Output.
+                                      Preview aktif — angka UI adalah offset dari posisi default. Scroll atau Arrow Up/Down di kolom angka (Shift = ±10), bisa juga klik lalu ketik. {elimBannerPreviewToProgram ? t('olb.previewMonitorAndPgm') : t('olb.previewMonitorOnly')}
                                     </span>
                                   ) : (
                                     <span className="block mt-1 text-zinc-500 normal-case">
@@ -5714,13 +5746,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      <button
                                        type="button"
                                        onClick={previewTerminatorBanner}
-                                       disabled={terminatorVisual.previewHold}
+                                       disabled={terminatorPreviewActive}
                                        className={`text-[7px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors ${
-                                         terminatorVisual.previewHold
+                                         terminatorPreviewActive
                                            ? 'text-zinc-700 cursor-not-allowed'
                                            : 'text-zinc-500 hover:text-[#ccff00]'
                                        }`}
-                                       title={terminatorVisual.previewHold ? 'Matikan Preview Sementara dulu' : undefined}
+                                       title={terminatorPreviewActive ? t('olb.disablePreviewFirst') : undefined}
                                      >
                                        <Play size={10} /> {t('olb.preview')}
                                      </button>
@@ -5734,27 +5766,25 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                    </div>
                                    <label
                                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                                       terminatorVisual.previewHold
+                                       terminatorPreviewActive
                                          ? 'bg-[#ccff00]/15 border-[#ccff00]/50 text-[#ccff00]'
                                          : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'
                                      }`}
                                    >
                                      <input
                                        type="checkbox"
-                                       checked={terminatorVisual.previewHold}
-                                       onChange={(e) =>
-                                         patchTerminatorVisual('previewHold', e.target.checked)
-                                       }
+                                       checked={terminatorPreviewActive}
+                                       onChange={(e) => setTerminatorPreviewActive(e.target.checked)}
                                        className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
                                      />
                                      <Eye size={10} />
                                       <span className="text-[7px] font-black uppercase tracking-widest">
-                                        Preview Sementara
+                                        {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${terminatorPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${terminatorPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
                                       <input type="checkbox" checked={terminatorPreviewToProgram} onChange={(e) => setTerminatorPreviewToProgram(e.target.checked)} />
-                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
                                 </div>
@@ -6137,13 +6167,13 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      <button
                                        type="button"
                                        onClick={previewFirstBloodBanner}
-                                       disabled={firstBloodVisual.previewHold}
+                                       disabled={firstBloodPreviewActive}
                                        className={`text-[7px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors ${
-                                         firstBloodVisual.previewHold
+                                         firstBloodPreviewActive
                                            ? 'text-zinc-700 cursor-not-allowed'
                                            : 'text-zinc-500 hover:text-[#ccff00]'
                                        }`}
-                                       title={firstBloodVisual.previewHold ? 'Matikan Preview Sementara dulu' : undefined}
+                                       title={firstBloodPreviewActive ? t('olb.disablePreviewFirst') : undefined}
                                      >
                                        <Play size={10} /> {t('olb.preview')}
                                      </button>
@@ -6157,27 +6187,25 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                    </div>
                                    <label
                                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                                       firstBloodVisual.previewHold
+                                       firstBloodPreviewActive
                                          ? 'bg-[#ccff00]/15 border-[#ccff00]/50 text-[#ccff00]'
                                          : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'
                                      }`}
                                    >
                                      <input
                                        type="checkbox"
-                                       checked={firstBloodVisual.previewHold}
-                                        onChange={(e) =>
-                                          patchFirstBloodVisual('previewHold', e.target.checked)
-                                        }
+                                       checked={firstBloodPreviewActive}
+                                       onChange={(e) => setFirstBloodPreviewActive(e.target.checked)}
                                        className="rounded border-white/20 bg-black text-[#ccff00] focus:ring-[#ccff00]"
                                      />
                                      <Eye size={10} />
                                       <span className="text-[7px] font-black uppercase tracking-widest">
-                                        Preview Sementara
+                                        {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${firstBloodPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${firstBloodPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
                                       <input type="checkbox" checked={firstBloodPreviewToProgram} onChange={(e) => setFirstBloodPreviewToProgram(e.target.checked)} />
-                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
                                 </div>
@@ -6873,12 +6901,12 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                      />
                                      <Eye size={10} />
                                       <span className="text-[7px] font-black uppercase tracking-widest">
-                                        Preview Sementara
+                                        {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${finalFourPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${finalFourPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
                                       <input type="checkbox" checked={finalFourPreviewToProgram} onChange={(e) => setFinalFourPreviewToProgram(e.target.checked)} />
-                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('gs.broadcastLabel')}</span>
+                                      <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
                                 </div>
@@ -6886,7 +6914,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                   Bar WWCD muncul saat ≤4 tim tersisa · geser posisi di canvas 1920×1080.
                                   {finalFourHoldPreview ? (
                                     <span className="block mt-1 text-[#ccff00] uppercase tracking-wide">
-                                      Preview aktif — 4 kartu contoh tampil di Monitor Preview / Program &amp; Link Output.
+                                      Preview aktif — 4 kartu contoh. {finalFourPreviewToProgram ? t('olb.previewMonitorAndPgm') : t('olb.previewMonitorOnly')}
                                     </span>
                                   ) : null}
                                 </p>
