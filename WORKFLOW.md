@@ -23,7 +23,11 @@ Sebuah item hanya boleh dianggap selesai setelah:
 3. Hasil, batasan, dan status commit/push (bila diminta) telah dilaporkan.
 4. Item Waiting List berikutnya baru boleh dimulai setelah instruksi pengguna.
 
+## Pekerjaan aktif
+
+- Rapikan Template PUBG Overall Ranking — Terminator hanya menjadi fitur Visual Overall Ranking, bukan asset mandiri.
+
 ## Waiting List saat ini
 
-1. MLBB In-Game Overlay — prioritas berikutnya; scope detail ditentukan sebelum implementasi.
+1. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
 2. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.

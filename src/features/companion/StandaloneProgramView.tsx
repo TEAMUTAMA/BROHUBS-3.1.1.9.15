@@ -15,7 +15,6 @@ import { useCompanionOutputSync } from './useCompanionOutputSync';
 import OverlayTopFraggersView from '@/features/games/pubg-mobile/overlays/theme-01/top-fraggers';
 import OverlayOverallRankingView from '@/features/games/pubg-mobile/overlays/theme-01/leaderboard';
 import OverlayTeamRosterView from '@/features/games/pubg-mobile/overlays/theme-01/team-roster';
-import OverlayTerminatorView from '@/features/games/pubg-mobile/overlays/theme-01/terminator';
 import OverlayValTeamRosterView from '@/features/games/valorant/overlays/theme-01/team-roster';
 import OverlayMlbbTeamRosterView from '@/features/games/mobile-legends/overlays/theme-01/team-roster';
 import OverlayMlbbDrafNPickView from '@/features/games/mobile-legends/overlays/theme-01/draf-n-pick';
@@ -280,27 +279,6 @@ const StandaloneProgramView: React.FC = () => {
       if (assetToPlay.id === 'pmgc-team-roster') {
         return (
           <OverlayTeamRosterView
-            key={overrideKey || assetToPlay.id}
-            asset={assetToPlay}
-            theme={themeToUse}
-            games={games}
-            themes={themes}
-            availableAssets={ASSET_DATABASE}
-            userRole="member"
-            onBack={() => {}}
-            globalLogo={globalLogo}
-            projectPlayers={projectPlayers}
-            isGlobalStudio={true}
-            visualOnly={true}
-            monitorFeed={true}
-            feedPlayKey={feedPlayKey}
-            style={style}
-          />
-        );
-      }
-      if (assetToPlay.id === 'pmgc-terminator') {
-        return (
-          <OverlayTerminatorView
             key={overrideKey || assetToPlay.id}
             asset={assetToPlay}
             theme={themeToUse}

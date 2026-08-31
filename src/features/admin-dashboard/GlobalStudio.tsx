@@ -4,7 +4,6 @@ import { ASSET_DATABASE } from '@/features/assets/assets';
 import OverlayTopFraggersView from '@/features/games/pubg-mobile/overlays/theme-01/top-fraggers';
 import OverlayOverallRankingView from '@/features/games/pubg-mobile/overlays/theme-01/leaderboard';
 import OverlayTeamRosterView from '@/features/games/pubg-mobile/overlays/theme-01/team-roster';
-import OverlayTerminatorView from '@/features/games/pubg-mobile/overlays/theme-01/terminator';
 import OverlayValTeamRosterView from '@/features/games/valorant/overlays/theme-01/team-roster';
 import OverlayMlbbTeamRosterView from '@/features/games/mobile-legends/overlays/theme-01/team-roster';
 import OverlayMlbbDrafNPickView from '@/features/games/mobile-legends/overlays/theme-01/draf-n-pick';
@@ -188,14 +187,12 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
         'pmgc-fraggers': 'F',
         'pmgc-leaderboard': 'L',
         'pmgc-team-roster': 'R',
-        'pmgc-terminator': 'T',
       };
     } catch (e) {
       return {
         'pmgc-fraggers': 'F',
         'pmgc-leaderboard': 'L',
         'pmgc-team-roster': 'R',
-        'pmgc-terminator': 'T',
       };
     }
   });
@@ -693,25 +690,6 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           />
         );
       }
-      if (assetToPlay.id === 'pmgc-terminator') {
-        return (
-          <OverlayTerminatorView
-            key={overrideKey || assetToPlay.id}
-            asset={assetToPlay}
-            theme={themeToUse}
-            games={games}
-            themes={themes}
-            availableAssets={ASSET_DATABASE}
-            userRole={userRole}
-            onBack={handleBack}
-            globalLogo={globalLogo}
-            projectPlayers={project?.players || []}
-            companionProjectScope={companionProjectScope}
-            isGlobalStudio={true}
-            {...monitorFeedProps}
-          />
-        );
-      }
     }
     if (assetToPlay.gameId === 'val') {
       if (assetToPlay.id === 'val-team-roster') {
@@ -912,23 +890,6 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
               programAssetIdProp={Object.values(programLayers).includes(activeAsset.id) ? activeAsset.id : null}
               onProgramAssetChange={handlePlayAsset}
               getAssetStatusProp={getAssetStatus}
-            />
-        );
-      }
-      if (activeAsset.id === 'pmgc-terminator') {
-        return (
-            <OverlayTerminatorView
-              asset={activeAsset}
-              theme={activeTheme}
-              games={games}
-              themes={filteredThemes}
-              availableAssets={filteredAssets}
-              userRole={userRole}
-              onBack={handleBack}
-              globalLogo={globalLogo}
-              projectPlayers={project?.players || []}
-              companionProjectScope={companionProjectScope}
-              isGlobalStudio={true}
             />
         );
       }

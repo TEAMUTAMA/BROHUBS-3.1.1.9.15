@@ -24,7 +24,6 @@ import { Theme, Asset, Game, PlayerData } from '../../../types';
 import AssetView from '@/features/assets/AssetView';
 import OverlayTopFraggersView from './overlays/theme-01/top-fraggers';
 import OverlayOverallRankingView from './overlays/theme-01/leaderboard';
-import OverlayTerminatorView from './overlays/theme-01/terminator';
 import OverlayTeamRosterView from './overlays/theme-01/team-roster';
 import { getGames, getDefaultThemes } from '../../../services/gameService';
 import { ASSET_DATABASE } from '@/features/assets/assets';
@@ -287,23 +286,6 @@ const PubgMobileView: React.FC<PubgMobileViewProps> = ({
       if (selectedAsset.id === 'pmgc-leaderboard') {
           return (
             <OverlayOverallRankingView
-                asset={selectedAsset}
-                theme={selectedTheme}
-                games={games}
-                themes={pubgThemes}
-                availableAssets={pubgAssets}
-                userRole={userRole}
-                onBack={() => { onSelectAsset(null); onSelectTheme(null as any); }}
-                onSelectTheme={onSelectTheme}
-                onSelectAsset={onSelectAsset}
-                globalLogo={globalLogo}
-                projectPlayers={projectPlayers}
-            />
-          );
-      }
-      if (selectedAsset.id === 'pmgc-terminator') {
-          return (
-            <OverlayTerminatorView
                 asset={selectedAsset}
                 theme={selectedTheme}
                 games={games}

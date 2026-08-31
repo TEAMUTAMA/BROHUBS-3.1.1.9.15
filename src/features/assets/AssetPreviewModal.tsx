@@ -8,7 +8,6 @@ import { useSharedState } from '@/lib/useSharedState';
 import OverlayTopFraggersView from '@/features/games/pubg-mobile/overlays/theme-01/top-fraggers';
 import OverlayOverallRankingView from '@/features/games/pubg-mobile/overlays/theme-01/leaderboard';
 import OverlayTeamRosterView from '@/features/games/pubg-mobile/overlays/theme-01/team-roster';
-import OverlayTerminatorView from '@/features/games/pubg-mobile/overlays/theme-01/terminator';
 import OverlayMlbbDrafNPickView from '@/features/games/mobile-legends/overlays/theme-01/draf-n-pick';
 
 interface AssetPreviewModalProps {
@@ -118,9 +117,6 @@ const AssetPreviewModal: React.FC<AssetPreviewModalProps> = ({
       }
       if (asset.id === 'pmgc-team-roster') {
         return <OverlayTeamRosterView key={asset.id} {...commonProps} />;
-      }
-      if (asset.id === 'pmgc-terminator') {
-        return <OverlayTerminatorView key={asset.id} {...commonProps} />;
       }
     }
     if (asset.gameId === 'mlbb') {

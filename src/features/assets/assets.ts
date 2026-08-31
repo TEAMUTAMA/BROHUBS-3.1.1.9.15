@@ -5,7 +5,6 @@ export const ASSET_DATABASE: Asset[] = [
     { id: 'pmgc-fraggers', name: 'TOP FRAGGERS', type: 'PMGC OFFICIAL', gameId: 'pubg', description: 'Official PMGC Top 5 player eliminations.', active: true, locked: false, category: 'SOCIAL', nodeStatus: 'GLOBAL NODE', tier: 'ULTIMATE' },
     { id: 'pmgc-leaderboard', name: 'OVERALL RANKING', type: 'PMGC OFFICIAL', gameId: 'pubg', description: 'Live in-game overall ranking for 16 PUBG Mobile teams.', active: true, locked: false, category: 'ENDGAME', nodeStatus: 'GLOBAL NODE', tier: 'ULTIMATE' },
     { id: 'pmgc-team-roster', name: 'TEAM ROSTER', type: 'PMGC OFFICIAL', gameId: 'pubg', description: 'Premium 16:9 esports roster — 5-player horizontal lineup with captain focus, HUD effects, and PMGO color sync.', active: true, locked: false, category: 'SOCIAL', nodeStatus: 'GLOBAL NODE', tier: 'ULTIMATE' },
-    { id: 'pmgc-terminator', name: 'TERMINATOR', type: 'PMGC OFFICIAL', gameId: 'pubg', description: 'Featured player domination banner with live highlight controls.', active: true, locked: false, category: 'INGAME', nodeStatus: 'GLOBAL NODE', tier: 'ULTIMATE' },
     
     { id: 'val-team-roster', name: 'TEAM ROSTER', type: 'VCT OFFICIAL', gameId: 'val', description: 'Premium 16:9 esports roster — 5-player horizontal lineup with captain focus, HUD effects, and color sync.', active: true, locked: false, category: 'SOCIAL', nodeStatus: 'GLOBAL NODE', tier: 'ULTIMATE' },
 

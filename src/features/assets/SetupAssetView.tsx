@@ -12,7 +12,6 @@ import PanelControlMonitor from '@/features/companion/PanelControlMonitor';
 import OverlayTopFraggersView from '@/features/games/pubg-mobile/overlays/theme-01/top-fraggers';
 import OverlayOverallRankingView from '@/features/games/pubg-mobile/overlays/theme-01/leaderboard';
 import OverlayTeamRosterView from '@/features/games/pubg-mobile/overlays/theme-01/team-roster';
-import OverlayTerminatorView from '@/features/games/pubg-mobile/overlays/theme-01/terminator';
 import OverlayMlbbDrafNPickView from '@/features/games/mobile-legends/overlays/theme-01/draf-n-pick';
 
 interface SetupAssetViewProps {
@@ -125,20 +124,6 @@ const SetupAssetView: React.FC<SetupAssetViewProps> = ({ games, themes, userRole
       );
     }
 
-    if (selectedAssetId === 'pmgc-terminator') {
-      return (
-        <OverlayTerminatorView
-          asset={activeAsset as Asset}
-          theme={activeTheme as Theme}
-          games={games}
-          themes={gameSpecificThemes}
-          availableAssets={gameSpecificAssets}
-          userRole={userRole}
-          onBack={() => setSelectedAssetId(null)}
-        />
-      );
-    }
-
     if (selectedAssetId === 'mlbb-draf-n-pick') {
       return (
         <OverlayMlbbDrafNPickView
@@ -221,21 +206,6 @@ const SetupAssetView: React.FC<SetupAssetViewProps> = ({ games, themes, userRole
           availableAssets={gameSpecificAssets} 
           userRole={userRole} 
           onBack={() => setSelectedAssetId(null)} 
-          onSelectAsset={(asset) => setSelectedAssetId(asset.id)}
-        />
-      );
-    }
-
-    if (selectedAssetId === 'pmgc-terminator') {
-      return (
-        <OverlayTerminatorView
-          asset={activeAsset as Asset}
-          theme={activeTheme as Theme}
-          games={games}
-          themes={gameSpecificThemes}
-          availableAssets={gameSpecificAssets}
-          userRole={userRole}
-          onBack={() => setSelectedAssetId(null)}
           onSelectAsset={(asset) => setSelectedAssetId(asset.id)}
         />
       );
