@@ -32,12 +32,11 @@ Sebuah item hanya boleh dianggap selesai setelah:
 
 ## Pekerjaan aktif
 
-- Tambahkan kontrol Play dan Play In/Out pada area pengaturan transisi agar operator dapat menguji preset/easing/spring/stagger terbaru sebelum dipakai live; seluruh teks UI harus memakai sistem terjemahan.
+- Audit dan konsolidasi penyimpanan file: pastikan file upload dinamis menggunakan Supabase Storage secara konsisten, tangani URL/logo yang gagal dimuat, dan kurangi fallback localStorage untuk data yang perlu tersedia lintas-PC.
 
 ## Waiting List saat ini
 
-1. Audit dan konsolidasi penyimpanan file: pastikan file upload dinamis menggunakan Supabase Storage secara konsisten, tangani URL/logo yang gagal dimuat, dan kurangi fallback localStorage untuk data yang perlu tersedia lintas-PC.
-2. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
-3. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
-4. Integrasi Supabase Realtime untuk Control Desk dan output publik (Vercel/domain sendiri) setelah asset dan uji lokal stabil.
-5. Audit seluruh teks UI dan pastikan semuanya diterjemahkan melalui sistem bahasa sesuai pengaturan pengguna.
+1. MLBB In-Game Overlay MVP — Gold Graph dan live match stats.
+2. MLBB Post-Match Overlay — dimulai setelah MLBB In-Game Overlay selesai.
+3. Integrasi Supabase Realtime untuk Control Desk dan output publik (Vercel/domain sendiri) setelah asset dan uji lokal stabil.
+4. Audit seluruh teks UI dan pastikan semuanya diterjemahkan melalui sistem bahasa sesuai pengaturan pengguna.

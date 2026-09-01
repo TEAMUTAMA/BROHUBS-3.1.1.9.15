@@ -3,6 +3,7 @@ import { getSupabase, isSupabaseConfigured } from './supabase';
 export const PROJECT_ASSETS_BUCKET = 'brohubs-assets';
 
 const DATA_URL_RE = /^data:([^;]+);base64,(.+)$/;
+const uploadedDataUrlCache = new Map<string, string>();
 
 function extensionForMime(mime: string): string {
   if (mime.includes('png')) return 'png';
@@ -20,6 +21,34 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+/**
+ * Simpan satu gambar ke Storage bila Supabase aktif. Saat mode lokal/offline,
+ * data URL tetap dikembalikan agar alur upload tidak terputus.
+ */
+export async function uploadImageFile(
+  file: File,
+  pathPrefix: string,
+  optimizedDataUrl?: string
+): Promise<string> {
+  const dataUrl = optimizedDataUrl ?? (await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  }));
+
+  if (!dataUrl || !isSupabaseConfigured()) return dataUrl;
+
+  const ext = extensionForMime(file.type || DATA_URL_RE.exec(dataUrl)?.[1] || 'image/png');
+  const path = `${pathPrefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    return await uploadDataUrl(dataUrl, path);
+  } catch (error) {
+    console.warn('[supabaseStorage] Upload gambar gagal, tetap pakai data lokal:', error);
+    return dataUrl;
+  }
 }
 
 export async function uploadDataUrl(dataUrl: string, storagePath: string): Promise<string> {
@@ -58,10 +87,14 @@ export async function uploadEmbeddedImages<T>(
   async function walk(node: unknown, prefix: string): Promise<unknown> {
     if (typeof node === 'string') {
       if (!DATA_URL_RE.test(node)) return node;
+      const cached = uploadedDataUrlCache.get(node);
+      if (cached) return cached;
       counter += 1;
       const ext = extensionForMime(DATA_URL_RE.exec(node)![1]!);
       const storagePath = `${pathPrefix}/${keyHint}-${counter}.${ext}`;
-      return uploadDataUrl(node, storagePath);
+      const uploaded = await uploadDataUrl(node, storagePath);
+      if (!uploaded.startsWith('data:')) uploadedDataUrlCache.set(node, uploaded);
+      return uploaded;
     }
 
     if (Array.isArray(node)) {

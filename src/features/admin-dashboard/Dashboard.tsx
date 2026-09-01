@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { compressImage, LOGO_PRESET } from '@/lib/imageCompression';
+import { compressImage, BACKGROUND_PRESET, LOGO_PRESET } from '@/lib/imageCompression';
+import { uploadImageFile } from '@/lib/supabaseStorage';
 import MasterOutputView from './MasterOutputView';
 import LanguageSwitcher from '@/components/shared/LanguageSwitcher';
 import { useT } from '@/i18n/LanguageContext';
@@ -638,11 +639,11 @@ const Dashboard: React.FC<DashboardProps> = ({
     const handleAdImageUpload = (e: React.ChangeEvent<HTMLInputElement>, adId: string) => {
       const file = e.target.files?.[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          handleUpdateAd(adId, { imageUrl: reader.result as string });
-        };
-        reader.readAsDataURL(file);
+        void compressImage(file, BACKGROUND_PRESET).then((dataUrl) =>
+          uploadImageFile(file, `catalog/ads/${adId}`, dataUrl)
+        ).then((imageUrl) => {
+          handleUpdateAd(adId, { imageUrl });
+        });
       }
     };
 
@@ -829,13 +830,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleGameImageUpload = (e: React.ChangeEvent<HTMLInputElement>, gameId: string) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
+      void compressImage(file, BACKGROUND_PRESET).then((dataUrl) =>
+        uploadImageFile(file, `catalog/games/${gameId}`, dataUrl)
+      ).then((image) => {
         setGames(prev => prev.map(game => 
-          game.id === gameId ? { ...game, image: reader.result as string } : game
+          game.id === gameId ? { ...game, image } : game
         ));
-      };
-      reader.readAsDataURL(file);
+      });
     }
   };
 

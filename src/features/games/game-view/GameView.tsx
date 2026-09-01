@@ -17,6 +17,8 @@ import { Theme, Asset } from '../../../types';
 import AssetView from '@/features/assets/AssetView';
 import { getDefaultThemes } from '../../../services/gameService';
 import { useT } from '../../../i18n/LanguageContext';
+import { compressImage, BACKGROUND_PRESET } from '@/lib/imageCompression';
+import { uploadImageFile } from '@/lib/supabaseStorage';
 
 // --- THEME CARD COMPONENT (Internal) ---
 
@@ -323,11 +325,11 @@ const GameView: React.FC<GameViewProps> = ({
   const handleThemeImageUpload = (e: React.ChangeEvent<HTMLInputElement>, themeId: string) => {
       const file = e.target.files?.[0];
       if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              setThemes(prev => prev.map(th => th.id === themeId ? { ...th, image: reader.result as string } : th));
-          };
-          reader.readAsDataURL(file);
+          void compressImage(file, BACKGROUND_PRESET).then((dataUrl) =>
+            uploadImageFile(file, `catalog/themes/${themeId}`, dataUrl)
+          ).then((image) => {
+              setThemes(prev => prev.map(th => th.id === themeId ? { ...th, image } : th));
+          });
       }
   };
 

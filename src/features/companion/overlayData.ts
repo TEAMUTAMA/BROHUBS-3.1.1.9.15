@@ -1,4 +1,5 @@
 import { applyCompanionSharedState } from './overlayAnimation';
+import { uploadEmbeddedImages } from '@/lib/supabaseStorage';
 
 export interface CompanionDataPayload {
   assetId: string;
@@ -96,7 +97,20 @@ export async function notifyCompanionData(
   projectScope?: string | null
 ): Promise<void> {
   if (!projectScope) return;
-  const body = buildCompanionRequestBody(payload, projectScope);
+  let normalizedPayload = payload;
+  try {
+    normalizedPayload = {
+      ...payload,
+      data: await uploadEmbeddedImages(
+        payload.data,
+        `companion/${encodeURIComponent(projectScope)}/${payload.assetId}`,
+        'img'
+      ),
+    };
+  } catch (error) {
+    console.warn('Companion image upload gagal, memakai payload saat ini:', error);
+  }
+  const body = buildCompanionRequestBody(normalizedPayload, projectScope);
   if (!body) return;
 
   try {

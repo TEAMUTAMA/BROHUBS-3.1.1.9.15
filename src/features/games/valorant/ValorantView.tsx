@@ -26,6 +26,8 @@ import OverlayTeamRosterView from './overlays/theme-01/team-roster';
 import { getGames, getDefaultThemes } from '../../../services/gameService';
 import { ASSET_DATABASE } from '@/features/assets/assets';
 import { useT } from '../../../i18n/LanguageContext';
+import { compressImage, BACKGROUND_PRESET } from '@/lib/imageCompression';
+import { uploadImageFile } from '@/lib/supabaseStorage';
 
 interface ValorantViewProps {
   onBack: () => void;
@@ -245,9 +247,11 @@ const ValorantView: React.FC<ValorantViewProps> = ({
   const handleThemeImageUpload = (e: React.ChangeEvent<HTMLInputElement>, themeId: string) => {
       const file = e.target.files?.[0];
       if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => { setThemes(prev => prev.map(t => t.id === themeId ? { ...t, image: reader.result as string } : t)); };
-          reader.readAsDataURL(file);
+          void compressImage(file, BACKGROUND_PRESET).then((dataUrl) =>
+            uploadImageFile(file, `catalog/themes/${themeId}`, dataUrl)
+          ).then((image) => {
+            setThemes(prev => prev.map(t => t.id === themeId ? { ...t, image } : t));
+          });
       }
   };
 

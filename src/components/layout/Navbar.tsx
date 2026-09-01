@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Settings, X, User, Lock, ArrowRight, ShieldCheck, AlertCircle, Loader2, HelpCircle, ArrowLeft, Mail, Eye, EyeOff, Menu as MenuIcon } from 'lucide-react';
 import { loginUser } from '@/features/auth/authService';
 import { motion, AnimatePresence } from 'motion/react';
@@ -50,6 +50,11 @@ const Navbar: React.FC<NavbarProps> = ({
   const [loginError, setLoginError] = useState('');
   const [isResetSent, setIsResetSent] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isLogoUnavailable, setIsLogoUnavailable] = useState(false);
+
+  useEffect(() => {
+    setIsLogoUnavailable(false);
+  }, [logo]);
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -171,9 +176,14 @@ const Navbar: React.FC<NavbarProps> = ({
       <nav className="fixed top-0 left-0 w-full z-50 bg-black/80 backdrop-blur-md border-b border-white/5 px-4 md:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3 cursor-pointer group logo-container" onClick={handleBrandClick}>
           <div className="flex items-center glitch-step transition-transform duration-300">
-            {logo ? (
+            {logo && !isLogoUnavailable ? (
               <div className="h-8 md:h-10 w-auto flex items-center animate-logo-float">
-                <img src={logo} alt="Business Logo" className="h-full w-auto object-contain mr-2 filter drop-shadow-[0_0_8px_rgba(204,255,0,0.3)]" />
+                <img
+                  src={logo}
+                  alt=""
+                  onError={() => setIsLogoUnavailable(true)}
+                  className="h-full w-auto object-contain mr-2 filter drop-shadow-[0_0_8px_rgba(204,255,0,0.3)]"
+                />
               </div>
             ) : (
               <div className="w-1.5 md:w-2 h-6 md:h-8 bg-[#ccff00] rounded-full mr-2 group-hover:h-10 transition-all duration-500 shadow-[0_0_15px_#ccff00]" />

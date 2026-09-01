@@ -21,6 +21,8 @@ import AssetView from '@/features/assets/AssetView';
 import { ASSET_DATABASE } from '@/features/assets/assets';
 import { getDefaultThemes, getGames } from '../../../services/gameService';
 import { useT } from '../../../i18n/LanguageContext';
+import { compressImage, BACKGROUND_PRESET } from '@/lib/imageCompression';
+import { uploadImageFile } from '@/lib/supabaseStorage';
 import OverlayTeamRosterView from './overlays/theme-01/team-roster';
 import OverlayDrafNPickView from './overlays/theme-01/draf-n-pick';
 
@@ -260,9 +262,9 @@ const MobileLegendsView: React.FC<MobileLegendsViewProps> = ({
   const handleThemeImageUpload = (e: React.ChangeEvent<HTMLInputElement>, themeId: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => updateTheme(themeId, { image: reader.result as string });
-    reader.readAsDataURL(file);
+    void compressImage(file, BACKGROUND_PRESET).then((dataUrl) =>
+      uploadImageFile(file, `catalog/themes/${themeId}`, dataUrl)
+    ).then((image) => updateTheme(themeId, { image }));
   };
 
   const handleThemeReset = async (themeId: string) => {
