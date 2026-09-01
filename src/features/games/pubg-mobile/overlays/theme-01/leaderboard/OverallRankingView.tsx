@@ -136,14 +136,14 @@ const OVERALL_RANKING_PROGRAM_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_PROGRAM_PRE
  * operator secara eksplisit memilih Kirim ke PGM.
  */
 interface OverallRankingLocalPreviewState {
-  elimination: { active: boolean; toProgram: boolean; token: number };
+  elimination: { active: boolean; toProgram: boolean; token: number; alert: TeamEliminationAlert | null };
   finalFour: { active: boolean; toProgram: boolean; token: number };
   terminator: { active: boolean; toProgram: boolean; token: number };
   firstBlood: { active: boolean; toProgram: boolean; token: number };
 }
 
 const DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW: OverallRankingLocalPreviewState = {
-  elimination: { active: false, toProgram: false, token: 0 },
+  elimination: { active: false, toProgram: false, token: 0, alert: null },
   finalFour: { active: false, toProgram: false, token: 0 },
   terminator: { active: false, toProgram: false, token: 0 },
   firstBlood: { active: false, toProgram: false, token: 0 },
@@ -1154,7 +1154,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     OVERALL_RANKING_LOCAL_PREVIEW_KEY,
     DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
   );
-  const [programPreview] = useSharedState<OverallRankingLocalPreviewState>(
+  const [programPreview, setProgramPreview] = useSharedState<OverallRankingLocalPreviewState>(
     OVERALL_RANKING_PROGRAM_PREVIEW_KEY,
     DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
   );
@@ -1163,23 +1163,31 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const previewState = visualOnly && programFeed && companionProjectScope
     ? programPreview
     : localPreview;
-  const previousProgramPreviewRef = useRef(false);
   useEffect(() => {
     if (visualOnly) return;
     const programPreview: OverallRankingLocalPreviewState = {
-      elimination: { ...localPreview.elimination, active: localPreview.elimination.active && localPreview.elimination.toProgram },
+      elimination: {
+        ...localPreview.elimination,
+        active: localPreview.elimination.active && localPreview.elimination.toProgram,
+        alert: localPreview.elimination.active && localPreview.elimination.toProgram
+          ? localPreview.elimination.alert
+          : null,
+      },
       finalFour: { ...localPreview.finalFour, active: localPreview.finalFour.active && localPreview.finalFour.toProgram },
       terminator: { ...localPreview.terminator, active: localPreview.terminator.active && localPreview.terminator.toProgram },
       firstBlood: { ...localPreview.firstBlood, active: localPreview.firstBlood.active && localPreview.firstBlood.toProgram },
     };
-    const hasProgramPreview = Object.values(programPreview).some((preview) => preview.active);
-    if (!hasProgramPreview && !previousProgramPreviewRef.current) return;
-    previousProgramPreviewRef.current = hasProgramPreview;
+    // Monitor PGM dalam browser operator harus langsung menerima snapshot
+    // terisolasi ini. SSE tetap menyebarkannya ke output/PC lain, namun
+    // tampilan lokal tidak boleh bergantung pada server meng-echo payload.
+    // Snapshot OFF juga selalu diterbitkan agar output yang baru dibuka tidak
+    // dapat mempertahankan preview lama (stale) dari sesi sebelumnya.
+    setProgramPreview(programPreview);
     syncCompanionData({
       assetId: asset.id,
       data: { [OVERALL_RANKING_PROGRAM_PREVIEW_KEY]: programPreview },
     });
-  }, [asset.id, localPreview, syncCompanionData, visualOnly]);
+  }, [asset.id, localPreview, setProgramPreview, syncCompanionData, visualOnly]);
   const finalFourHoldPreview = previewState.finalFour.active;
   const finalFourPreviewToProgram = previewState.finalFour.toProgram;
   const setFinalFourHoldPreview = useCallback(
@@ -1357,10 +1365,35 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [isTemplateInProgram, setLocalPreview]
   );
   useEffect(() => {
-    if (visualOnly || isTemplateInProgram) return;
-    // Keluar dari PGM selalu mencabut izin sebelumnya. Ketika template masuk
-    // lagi ke PGM, operator harus mencentang ulang secara sadar.
+    if (visualOnly) return;
     setLocalPreview((prev) => {
+      if (isTemplateInProgram) {
+        // Saat Overall Ranking benar-benar naik ke PGM, tutup seluruh simulasi
+        // Preview Sementara. Operator harus memulai preview baru secara sadar
+        // dari kondisi live PGM, sehingga tidak ada banner staging yang ikut naik.
+        if (
+          !prev.elimination.active &&
+          !prev.finalFour.active &&
+          !prev.terminator.active &&
+          !prev.firstBlood.active &&
+          !prev.elimination.toProgram &&
+          !prev.finalFour.toProgram &&
+          !prev.terminator.toProgram &&
+          !prev.firstBlood.toProgram
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          elimination: { ...prev.elimination, active: false, toProgram: false, alert: null },
+          finalFour: { ...prev.finalFour, active: false, toProgram: false },
+          terminator: { ...prev.terminator, active: false, toProgram: false },
+          firstBlood: { ...prev.firstBlood, active: false, toProgram: false },
+        };
+      }
+
+      // Keluar dari PGM selalu mencabut izin sebelumnya. Ketika template masuk
+      // lagi ke PGM, operator harus mencentang ulang secara sadar.
       if (
         !prev.elimination.toProgram &&
         !prev.finalFour.toProgram &&
@@ -2235,7 +2268,16 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const elimBannerHoldPreview = previewState.elimination.active;
   const elimBannerPreviewToProgram = previewState.elimination.toProgram;
   const setElimBannerHoldPreview = useCallback(
-    (active: boolean) => setLocalPreview((prev) => ({ ...prev, elimination: { ...prev.elimination, active } })),
+    (active: boolean, alert: TeamEliminationAlert | null = null) => setLocalPreview((prev) => ({
+      ...prev,
+      elimination: {
+        ...prev.elimination,
+        active,
+        // Snapshot banner simulasi ikut kanal preview saja; jangan pernah
+        // menulisnya ke TEAM_ELIMINATION_ALERT_KEY (event live).
+        alert: active ? alert ?? prev.elimination.alert : null,
+      },
+    })),
     [setLocalPreview]
   );
   const setElimBannerPreviewToProgram = useCallback(
@@ -2364,7 +2406,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         elimBannerTuningLiveRef.current = { ...elimBannerLayout };
         setFrozenStagedElimAlert(stagedAlert);
         setPreviewEliminationAlert(stagedAlert);
-        setElimBannerHoldPreview(true);
+        setElimBannerHoldPreview(true, stagedAlert);
         return;
       }
       if (stagedCompanionPushTimerRef.current) {
@@ -2406,7 +2448,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const elimBannerPreviewVisible =
     elimBannerHoldPreview && (!visualOnly || !programFeed || elimBannerPreviewToProgram);
   const displayElimAlert = elimBannerHoldPreview
-    ? (frozenStagedElimAlert ?? STAGED_ELIM_PREVIEW_FALLBACK)
+    ? (frozenStagedElimAlert ?? previewState.elimination.alert ?? STAGED_ELIM_PREVIEW_FALLBACK)
     : (previewEliminationAlert ?? eliminationAlert);
 
   const showEliminationBanner =

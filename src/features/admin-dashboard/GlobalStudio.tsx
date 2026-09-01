@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSharedState } from '@/lib/useSharedState';
 import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey, getPreviewAssetKey, companionScopeMatches } from '@/features/companion/programLayers';
 import { notifyCompanionTrigger, type CompanionTriggerPayload } from '@/features/companion/companionProgram';
-import { notifyCompanionData } from '@/features/companion/overlayData';
+import { applyCompanionDataPayload, notifyCompanionData, type CompanionDataPayload } from '@/features/companion/overlayData';
 import {
   AnimationConfig,
   resolveAnimationConfig,
@@ -613,6 +613,20 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
           handleCompanionTriggerRef.current(payload);
         } catch (e) {
           console.error('Error parsing SSE trigger payload:', e);
+        }
+      });
+
+      // Preview PGM adalah payload data (bukan trigger play/stop). Terapkan
+      // snapshot yang scoped agar komponen pada Monitor PGM membaca state
+      // khusus PGM yang sama dengan output OBS/vMix.
+      sse.addEventListener('data', (event: MessageEvent) => {
+        try {
+          const payload = JSON.parse(event.data) as CompanionDataPayload;
+          if (!payload?.assetId || !payload.data) return;
+          if (!companionScopeMatches(payload.projectScope, companionProjectScope)) return;
+          applyCompanionDataPayload(payload);
+        } catch (error) {
+          console.error('Error parsing SSE data payload:', error);
         }
       });
 

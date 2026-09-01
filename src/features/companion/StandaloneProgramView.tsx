@@ -248,6 +248,7 @@ const StandaloneProgramView: React.FC = () => {
             onBack={() => {}}
             globalLogo={globalLogo}
             projectPlayers={projectPlayers}
+            companionProjectScope={projectScope}
             isGlobalStudio={true}
             visualOnly={true}
             style={style}
