@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// Deploy: firebase deploy --only firestore:rules
+//
+// TAHAP AWAL (development / testing):
+//   Semua client boleh baca & tulis admin_tasks.
+//   Ganti ke rules ketat setelah Firebase Auth dipasang (langkah berikutnya).
+//
+// TAHAP PRODUKSI (nanti):
+//   - Member: read admin_tasks (filter DEVELOPMENT dilakukan di app)
+//   - Admin: read + write (butuh request.auth + custom claim admin)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /admin_tasks/{taskId} {
+      allow read, write: if true;
+    }
+
+    match /members/{memberId} {
+      allow read, write: if true;
+    }
+
+    match /games/{gameId} {
+      allow read, write: if true;
+    }
+
+    match /themes/{themeId} {
+      allow read, write: if true;
+    }
+
+    match /ads/{adId} {
+      allow read, write: if true;
+    }
+
+    match /public_features/{featureId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

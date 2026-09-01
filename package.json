@@ -4,15 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "dev": "tsx server/server.ts",
+    "build": "vite build && esbuild server/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.35.0",
+    "@supabase/supabase-js": "^2.107.0",
     "express": "^5.2.1",
+    "firebase": "^11.10.0",
     "lucide-react": "^0.562.0",
     "motion": "^12.36.0",
     "react": "^19.2.3",
