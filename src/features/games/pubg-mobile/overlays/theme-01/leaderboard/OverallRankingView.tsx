@@ -1141,6 +1141,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   const eliminationsInitializedRef = useRef(false);
   const finalFourSoloExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finalFourTopBarVisible, setFinalFourTopBarVisible] = useState(false);
+  // Sumber kebenaran posisi template. Preview To PGM tidak boleh dapat
+  // diaktifkan hanya karena Overall Ranking pernah dipilih di Monitor Preview.
+  const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
+  const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
+  const setProgramAssetId = (id: string | null) => {
+    if (onProgramAssetChange) onProgramAssetChange(id);
+    else setInternalProgramAssetId(id);
+  };
+  const isTemplateInProgram = programAssetId === asset.id;
   const [localPreview, setLocalPreview] = useSharedState<OverallRankingLocalPreviewState>(
     OVERALL_RANKING_LOCAL_PREVIEW_KEY,
     DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
@@ -1178,8 +1187,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [setLocalPreview]
   );
   const setFinalFourPreviewToProgram = useCallback(
-    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, finalFour: { ...prev.finalFour, toProgram } })),
-    [setLocalPreview]
+    (toProgram: boolean) => setLocalPreview((prev) => ({
+      ...prev,
+      finalFour: { ...prev.finalFour, toProgram: toProgram && isTemplateInProgram },
+    })),
+    [isTemplateInProgram, setLocalPreview]
   );
 
   const [isScoringModalOpen, setIsScoringModalOpen] = useState(false);
@@ -1319,8 +1331,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [setLocalPreview]
   );
   const setTerminatorPreviewToProgram = useCallback(
-    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, terminator: { ...prev.terminator, toProgram } })),
-    [setLocalPreview]
+    (toProgram: boolean) => setLocalPreview((prev) => ({
+      ...prev,
+      terminator: { ...prev.terminator, toProgram: toProgram && isTemplateInProgram },
+    })),
+    [isTemplateInProgram, setLocalPreview]
   );
   // Baseline "0" slider offset mengikuti design Terminator yang sedang dibuka.
   const terminatorBaseline = terminatorDesignBaseline(terminatorVisual.designVariant);
@@ -1335,9 +1350,34 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [setLocalPreview]
   );
   const setFirstBloodPreviewToProgram = useCallback(
-    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, firstBlood: { ...prev.firstBlood, toProgram } })),
-    [setLocalPreview]
+    (toProgram: boolean) => setLocalPreview((prev) => ({
+      ...prev,
+      firstBlood: { ...prev.firstBlood, toProgram: toProgram && isTemplateInProgram },
+    })),
+    [isTemplateInProgram, setLocalPreview]
   );
+  useEffect(() => {
+    if (visualOnly || isTemplateInProgram) return;
+    // Keluar dari PGM selalu mencabut izin sebelumnya. Ketika template masuk
+    // lagi ke PGM, operator harus mencentang ulang secara sadar.
+    setLocalPreview((prev) => {
+      if (
+        !prev.elimination.toProgram &&
+        !prev.finalFour.toProgram &&
+        !prev.terminator.toProgram &&
+        !prev.firstBlood.toProgram
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        elimination: { ...prev.elimination, toProgram: false },
+        finalFour: { ...prev.finalFour, toProgram: false },
+        terminator: { ...prev.terminator, toProgram: false },
+        firstBlood: { ...prev.firstBlood, toProgram: false },
+      };
+    });
+  }, [isTemplateInProgram, setLocalPreview, visualOnly]);
   const [firstBloodAlert, setFirstBloodAlert] = useSharedState<FirstBloodAlert | null>(
     FIRST_BLOOD_ALERT_KEY,
     null
@@ -1941,14 +1981,6 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
         : true
       : controlShowOverlay;
   const setShowOverlay = setControlShowOverlay;
-  const [internalProgramAssetId, setInternalProgramAssetId] = useState<string | null>(null);
-  
-  const programAssetId = programAssetIdProp !== undefined ? programAssetIdProp : internalProgramAssetId;
-  const setProgramAssetId = (id: string | null) => {
-    if (onProgramAssetChange) onProgramAssetChange(id);
-    else setInternalProgramAssetId(id);
-  };
-
   // Reactive Sync
   const teamsRef = useRef(teams);
   useEffect(() => { teamsRef.current = teams; }, [teams]);
@@ -2207,8 +2239,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     [setLocalPreview]
   );
   const setElimBannerPreviewToProgram = useCallback(
-    (toProgram: boolean) => setLocalPreview((prev) => ({ ...prev, elimination: { ...prev.elimination, toProgram } })),
-    [setLocalPreview]
+    (toProgram: boolean) => setLocalPreview((prev) => ({
+      ...prev,
+      elimination: { ...prev.elimination, toProgram: toProgram && isTemplateInProgram },
+    })),
+    [isTemplateInProgram, setLocalPreview]
   );
   const [previewEliminationAlert, setPreviewEliminationAlert] = useState<TeamEliminationAlert | null>(null);
   const previewEliminationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -5096,8 +5131,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                        {t('olb.previewTemporary')}
                                      </span>
                                      </label>
-                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${elimBannerPreviewToProgram ? 'bg-orange-400/15 border-orange-400/50 text-orange-300' : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'}`}>
-                                      <input type="checkbox" checked={elimBannerPreviewToProgram} onChange={(e) => setElimBannerPreviewToProgram(e.target.checked)} className="rounded border-white/20 bg-black text-orange-400 focus:ring-orange-400" />
+                                    <label title={isTemplateInProgram ? t('olb.previewToPgm') : t('olb.previewToPgmLocked')} aria-disabled={!isTemplateInProgram} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all ${isTemplateInProgram ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} ${elimBannerPreviewToProgram ? 'bg-orange-400/15 border-orange-400/50 text-orange-300' : 'bg-black border-white/10 text-zinc-500 hover:border-white/20'}`}>
+                                      <input type="checkbox" disabled={!isTemplateInProgram} checked={elimBannerPreviewToProgram} onChange={(e) => setElimBannerPreviewToProgram(e.target.checked)} className="rounded border-white/20 bg-black text-orange-400 focus:ring-orange-400" />
                                       <Monitor size={10} />
                                       <span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
@@ -5782,8 +5817,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                         {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${terminatorPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
-                                      <input type="checkbox" checked={terminatorPreviewToProgram} onChange={(e) => setTerminatorPreviewToProgram(e.target.checked)} />
+                                    <label title={isTemplateInProgram ? t('olb.previewToPgm') : t('olb.previewToPgmLocked')} aria-disabled={!isTemplateInProgram} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border ${isTemplateInProgram ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} ${terminatorPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" disabled={!isTemplateInProgram} checked={terminatorPreviewToProgram} onChange={(e) => setTerminatorPreviewToProgram(e.target.checked)} />
                                       <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
@@ -6203,8 +6238,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                         {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${firstBloodPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
-                                      <input type="checkbox" checked={firstBloodPreviewToProgram} onChange={(e) => setFirstBloodPreviewToProgram(e.target.checked)} />
+                                    <label title={isTemplateInProgram ? t('olb.previewToPgm') : t('olb.previewToPgmLocked')} aria-disabled={!isTemplateInProgram} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border ${isTemplateInProgram ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} ${firstBloodPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" disabled={!isTemplateInProgram} checked={firstBloodPreviewToProgram} onChange={(e) => setFirstBloodPreviewToProgram(e.target.checked)} />
                                       <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
@@ -6904,8 +6939,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                         {t('olb.previewTemporary')}
                                       </span>
                                     </label>
-                                    <label title={t('olb.previewToPgm')} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer ${finalFourPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
-                                      <input type="checkbox" checked={finalFourPreviewToProgram} onChange={(e) => setFinalFourPreviewToProgram(e.target.checked)} />
+                                    <label title={isTemplateInProgram ? t('olb.previewToPgm') : t('olb.previewToPgmLocked')} aria-disabled={!isTemplateInProgram} className={`flex shrink-0 items-center gap-2 px-2.5 py-1.5 rounded-lg border ${isTemplateInProgram ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} ${finalFourPreviewToProgram ? 'border-orange-400/50 text-orange-300' : 'border-white/10 text-zinc-500'}`}>
+                                      <input type="checkbox" disabled={!isTemplateInProgram} checked={finalFourPreviewToProgram} onChange={(e) => setFinalFourPreviewToProgram(e.target.checked)} />
                                       <Monitor size={10} /><span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
                                     </div>
