@@ -129,6 +129,13 @@ interface EliminationBannerLayout {
 const STAGED_ELIM_PREVIEW_ALERT_ID = 'brohubs-elim-banner-staged-preview';
 const OVERALL_RANKING_LOCAL_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_LOCAL_PREVIEW';
 const OVERALL_RANKING_PROGRAM_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_PROGRAM_PREVIEW';
+const OVERALL_RANKING_TRANSITION_PREVIEW_KEY = 'BROHUBS_OVERALL_RANKING_TRANSITION_PREVIEW';
+
+interface OverallRankingTransitionPreviewState {
+  config: AnimationConfig;
+  visible: boolean;
+  token: number;
+}
 
 /**
  * Kanal preview hanya untuk monitor di browser operator. Ia sengaja terpisah
@@ -224,6 +231,7 @@ import {
   LEADERBOARD_PROGRAM_VISIBLE_KEY,
   LEADERBOARD_PRESET_OVERRIDES_STORAGE_KEY,
   resolveLeaderboardExitDurationSeconds,
+  resolveLeaderboardOutroHoldMs,
   type LeaderboardPresetOverrides,
 } from './animation/config';
 import TeamEliminatedBanner from './components/TeamEliminatedBanner';
@@ -1158,6 +1166,10 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     OVERALL_RANKING_PROGRAM_PREVIEW_KEY,
     DEFAULT_OVERALL_RANKING_LOCAL_PREVIEW
   );
+  const [transitionPreview, setTransitionPreview] = useSharedState<OverallRankingTransitionPreviewState | null>(
+    OVERALL_RANKING_TRANSITION_PREVIEW_KEY,
+    null
+  );
   // Output OBS/vMix hanya membaca kanal PGM, sedangkan control desk dan
   // Monitor Preview tetap membaca preview lokal operator.
   const previewState = visualOnly && programFeed && companionProjectScope
@@ -1304,6 +1316,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
 
   const handleSave = () => {
     setIsSaving(true);
+    setTransitionPreview(null);
+    setTransitionPreviewConfig(null);
     
     // Commit draft to shared state
     commitAnimationConfig(draftAnimationConfig);
@@ -1317,11 +1331,6 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     setTimeout(() => {
       setIsSaving(false);
     }, 1500);
-  };
-
-  const triggerPreview = () => {
-    setShowOverlay(false);
-    setTimeout(() => setShowOverlay(true), 1000);
   };
 
   const [visualConfig, setVisualConfig] = useSharedState<VisualConfig>(
@@ -1980,6 +1989,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   );
 
   const [draftAnimationConfig, setDraftAnimationConfig] = useState<AnimationConfig>(animationConfig);
+  const [transitionPreviewConfig, setTransitionPreviewConfig] = useState<AnimationConfig | null>(null);
+  const transitionPreviewTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Sync draft when shared state changes (from another operator or initial load)
   useEffect(() => {
@@ -1987,8 +1998,14 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   }, [animationConfig]);
 
   const effectiveAnimationConfig = useMemo(
-    () => resolveAnimationConfig(animationConfig, presetOverrides, LEADERBOARD_ANIMATION_PRESETS),
-    [animationConfig, presetOverrides]
+    () => resolveAnimationConfig(
+      (visualOnly && monitorFeed && !programFeed
+        ? transitionPreview?.config
+        : transitionPreviewConfig) ?? animationConfig,
+      presetOverrides,
+      LEADERBOARD_ANIMATION_PRESETS
+    ),
+    [animationConfig, monitorFeed, presetOverrides, programFeed, transitionPreview, transitionPreviewConfig, visualOnly]
   );
 
   // Push transition settings to OBS / output links (separate browser storage)
@@ -2011,9 +2028,59 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     visualOnly || monitorFeed
       ? isProgramDrivenFeed
         ? sharedProgramVisible
-        : true
+        : transitionPreview?.visible ?? true
       : controlShowOverlay;
   const setShowOverlay = setControlShowOverlay;
+
+  const clearTransitionPreviewTimers = useCallback(() => {
+    transitionPreviewTimersRef.current.forEach(clearTimeout);
+    transitionPreviewTimersRef.current = [];
+  }, []);
+
+  useEffect(() => clearTransitionPreviewTimers, [clearTransitionPreviewTimers]);
+
+  const playTransitionPreview = useCallback((includeOut: boolean) => {
+    const previewConfig = { ...draftAnimationConfig };
+    const maxRowEnterDelay = Math.max(
+      ...Array.from({ length: 16 }, (_, index) =>
+        resolveStaggerDelay(index, 16, previewConfig, 0.35)
+      )
+    );
+    const enterMs = Math.ceil((maxRowEnterDelay + previewConfig.duration + 0.25) * 1000);
+    const outroMs = resolveLeaderboardOutroHoldMs(previewConfig);
+    // Beri ruang setelah OUT dan setelah IN supaya preview tidak terasa
+    // seperti toggle mendadak saat operator menekan tombol berulang kali.
+    const interTransitionDelayMs = 320;
+    const inOutHoldMs = 800;
+    const inStartMs = outroMs + interTransitionDelayMs;
+
+    clearTransitionPreviewTimers();
+    setTransitionPreviewConfig(previewConfig);
+    setTransitionPreview({ config: previewConfig, visible: false, token: Date.now() });
+    setControlShowOverlay(false);
+
+    transitionPreviewTimersRef.current.push(setTimeout(() => {
+      setTransitionPreview((current) => current
+        ? { ...current, visible: true }
+        : current
+      );
+      setControlShowOverlay(true);
+    }, inStartMs));
+
+    if (!includeOut) return;
+
+    transitionPreviewTimersRef.current.push(setTimeout(() => {
+      setTransitionPreview((current) => current
+        ? { ...current, visible: false }
+        : current
+      );
+      setControlShowOverlay(false);
+    }, inStartMs + enterMs + inOutHoldMs));
+
+    transitionPreviewTimersRef.current.push(setTimeout(() => {
+      setTransitionPreviewConfig(null);
+    }, inStartMs + enterMs + inOutHoldMs + outroMs));
+  }, [clearTransitionPreviewTimers, draftAnimationConfig, setTransitionPreview]);
   // Reactive Sync
   const teamsRef = useRef(teams);
   useEffect(() => { teamsRef.current = teams; }, [teams]);
@@ -7207,7 +7274,8 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                         setPresetOverrides={setPresetOverrides}
                         isSaving={isSaving}
                         onSave={handleSave}
-                        onPreview={triggerPreview}
+                        onPlay={() => playTransitionPreview(false)}
+                        onPlayInOut={() => playTransitionPreview(true)}
                       />
                     )}
                 </div>

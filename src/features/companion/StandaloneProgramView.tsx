@@ -268,6 +268,7 @@ const StandaloneProgramView: React.FC = () => {
             onBack={() => {}}
             globalLogo={globalLogo}
             projectPlayers={projectPlayers}
+            companionProjectScope={projectScope}
             isGlobalStudio={true}
             visualOnly={true}
             monitorFeed={true}
@@ -428,28 +429,20 @@ const StandaloneProgramView: React.FC = () => {
                 className="absolute inset-0"
                 style={{ zIndex: layerNum }}
               >
-                <AnimatePresence mode="wait" initial={false}>
-                  {visibleAssetId ? (
-                    // Anak langsung AnimatePresence WAJIB motion element (samakan dengan Monitor PGM),
-                    // supaya animasi in/out yang bersarang di masterFrame (mis. Draf N Pick) ikut jalan.
-                    // exit menahan sampai anak selesai (when: afterChildren) agar OUT tidak "lompat".
-                    <motion.div
-                      key={`standalone-layer-${layer}-${visibleAssetId}-${layerPlayKey}`}
-                      className="absolute inset-0"
-                      initial={false}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 1, transition: { when: 'afterChildren' } }}
-                    >
-                      <PreviewControlContext.Provider
-                        value={{
-                          playKey: layerPlayKey,
-                          programPlayKey: layerPlayKey,
-                          isLooping: false,
-                          isPreviewPlaying: true,
-                          replay: () => {},
-                        }}
-                      >
-                        {renderProgramAsset(
+                <PreviewControlContext.Provider
+                  value={{
+                    playKey: layerPlayKey,
+                    programPlayKey: layerPlayKey,
+                    isLooping: false,
+                    isPreviewPlaying: true,
+                    replay: () => {},
+                  }}
+                >
+                  {/* Samakan lifecycle asset dengan node yang dirender Monitor PGM:
+                      asset langsung menjadi child AnimatePresence tanpa wrapper motion tambahan. */}
+                  <AnimatePresence mode="sync" initial={false}>
+                    {visibleAssetId
+                      ? renderProgramAsset(
                           visibleAssetId,
                           {
                             position: 'absolute',
@@ -460,11 +453,10 @@ const StandaloneProgramView: React.FC = () => {
                           },
                           `standalone-layer-${layer}-${visibleAssetId}-${layerPlayKey}`,
                           layerPlayKey
-                        )}
-                      </PreviewControlContext.Provider>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
+                        )
+                      : null}
+                  </AnimatePresence>
+                </PreviewControlContext.Provider>
               </div>
             );
           })}

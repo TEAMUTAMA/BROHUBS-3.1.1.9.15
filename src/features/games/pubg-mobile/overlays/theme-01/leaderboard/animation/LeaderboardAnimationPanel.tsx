@@ -7,7 +7,9 @@ import {
   ListOrdered,
   Minus,
   Plus,
+  Play,
   RefreshCw,
+  Repeat2,
   Settings2,
   Zap,
 } from 'lucide-react';
@@ -39,7 +41,8 @@ interface LeaderboardAnimationPanelProps {
   setPresetOverrides: (overrides: LeaderboardPresetOverrides) => void;
   isSaving: boolean;
   onSave: () => void;
-  onPreview: () => void;
+  onPlay: () => void;
+  onPlayInOut: () => void;
 }
 
 export function LeaderboardAnimationPanel({
@@ -53,7 +56,8 @@ export function LeaderboardAnimationPanel({
   setPresetOverrides,
   isSaving,
   onSave,
-  onPreview,
+  onPlay,
+  onPlayInOut,
 }: LeaderboardAnimationPanelProps) {
   const [activeDropdown, setActiveDropdown] = useState<{ presetId: string; type: 'in' | 'out' } | null>(null);
 
@@ -90,7 +94,7 @@ export function LeaderboardAnimationPanel({
     setAnimationConfig(newConfig);
     localStorage.setItem(LEADERBOARD_ANIMATION_STORAGE_KEY, JSON.stringify(newConfig));
     setActiveDropdown(null);
-    onPreview();
+    onPlay();
   };
 
   return (
@@ -245,6 +249,25 @@ export function LeaderboardAnimationPanel({
                 </select>
               </div>
             </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-3 mt-6 pt-6 border-t border-white/5">
+              <button
+                type="button"
+                onClick={onPlay}
+                className="px-5 py-3 rounded-xl border border-[#ccff00]/40 bg-[#ccff00]/10 text-[#ccff00] hover:bg-[#ccff00] hover:text-black transition-all text-[9px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2"
+              >
+                <Play size={13} fill="currentColor" />
+                {t('olb.playTransition')}
+              </button>
+              <button
+                type="button"
+                onClick={onPlayInOut}
+                className="px-5 py-3 rounded-xl border border-white/15 bg-black text-white hover:border-[#ccff00]/50 hover:text-[#ccff00] transition-all text-[9px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2"
+              >
+                <Repeat2 size={13} />
+                {t('olb.playTransitionInOut')}
+              </button>
+            </div>
           </div>
         </>
       ) : (
@@ -263,7 +286,7 @@ export function LeaderboardAnimationPanel({
                       presetId: preset.id,
                       ...preset.config,
                     } as AnimationConfig);
-                    onPreview();
+                    onPlay();
                   }}
                   className={`p-6 rounded-[32px] border text-left transition-all group relative overflow-hidden cursor-pointer ${animationConfig.presetId === preset.id ? 'bg-[#ccff00] border-[#ccff00] shadow-xl shadow-[#ccff00]/20' : 'bg-zinc-900/50 border-white/5 hover:border-white/20'}`}
                 >
