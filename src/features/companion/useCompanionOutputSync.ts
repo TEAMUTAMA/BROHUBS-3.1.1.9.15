@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { applyCompanionToProgramLayers, type CompanionTriggerPayload } from './companionProgram';
 import { applyCompanionAnimationPayload, type CompanionAnimationPayload } from './overlayAnimation';
 import { applyCompanionDataPayload, type CompanionDataPayload } from './overlayData';
+import { companionStreamUrl } from './streamUrl';
 import { companionScopeMatches } from './programLayers';
 
 type LayerUpdater = (
@@ -41,7 +42,7 @@ export function useCompanionOutputSync(
       companionScopeMatches(payloadScope, localScopeRef.current);
 
     const connect = () => {
-      sse = new EventSource('/api/companion/stream');
+      sse = new EventSource(companionStreamUrl(localScopeRef.current));
 
       sse.addEventListener('trigger', (event: MessageEvent) => {
         try {

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Settings, X, User, Lock, ArrowRight, ShieldCheck, AlertCircle, Loader2, HelpCircle, ArrowLeft, Mail, Eye, EyeOff, Menu as MenuIcon } from 'lucide-react';
-import { loginUser } from '@/features/auth/authService';
+import { loginUser, emailOf } from '@/features/auth/authService';
 import { motion, AnimatePresence } from 'motion/react';
 import { useT } from '@/i18n/LanguageContext';
 
@@ -74,7 +74,7 @@ const Navbar: React.FC<NavbarProps> = ({
         if (result) {
             onLogin(
               result.role,
-              result.role === 'member' ? result.memberEmail : username,
+              emailOf(result),
               result.role === 'member' ? result.requiresPasswordSetup : false
             );
             handleClose();

@@ -125,6 +125,14 @@ export function resolveEliminationBannerTextFontFamily(visual: EliminationBanner
 }
 
 export interface EliminationBannerVisual {
+  /**
+   * Lama banner bertahan di layar sebelum transisi keluar, dalam detik.
+   *
+   * Dulu nilainya di-hardcode 5,5 detik di OverallRankingView, padahal First
+   * Blood dan Terminator sama-sama punya `displaySeconds` yang bisa diatur.
+   * Dijadikan setelan supaya ketiganya seragam.
+   */
+  elimBannerDisplaySeconds: number;
   elimBannerDesignMode: EliminationBannerDesignMode;
   /** Custom Image: fullLink = satu gambar; panelLinks = logo/main/#/nama */
   elimBannerCustomImageVariant: EliminationBannerCustomImageVariant;
@@ -163,6 +171,9 @@ export interface EliminationBannerVisual {
 }
 
 export const DEFAULT_ELIMINATION_BANNER_VISUAL: EliminationBannerVisual = {
+  // 5,5 detik = nilai hardcoded yang berlaku sebelumnya, dipertahankan sebagai
+  // default supaya tampilan yang sudah disetel tidak berubah.
+  elimBannerDisplaySeconds: 5.5,
   elimBannerDesignMode: 'panels',
   elimBannerCustomImageVariant: 'fullLink',
   elimBannerFullImageUrl: '',
@@ -413,3 +424,13 @@ export function panelSurfaceStyle(
   }
   return { backgroundColor: color };
 }
+
+/**
+ * Batas aman durasi banner eliminasi (detik).
+ *
+ * Kelipatan 0,5 supaya 5,5 detik — nilai lama — tetap bisa dipilih persis.
+ */
+export const clampElimBannerDisplaySeconds = (value: number): number => {
+  if (!Number.isFinite(value)) return DEFAULT_ELIMINATION_BANNER_VISUAL.elimBannerDisplaySeconds;
+  return Math.max(1, Math.min(30, Math.round(value * 2) / 2));
+};

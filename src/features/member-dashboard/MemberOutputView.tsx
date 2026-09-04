@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Member, Asset, Project } from '@/types';
+import { slugify } from '@/lib/slugify';
+import { buildProjectSegment } from '@/lib/outputRoute';
 import { useSharedState } from '@/lib/useSharedState';
 import { getProgramLayersKey, getPreviewAssetKey } from '@/features/companion/programLayers';
 import { useT } from '@/i18n/LanguageContext';
@@ -88,8 +90,6 @@ const MemberOutputView: React.FC<MemberOutputViewProps> = ({ povMember, assets, 
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  const slugify = (text: string) => text.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
-
   const getPublicUrl = (asset: Asset) => {
     const baseUrl = window.location.origin;
     // Map existing Member 'name' to the slugified username
@@ -100,10 +100,14 @@ const MemberOutputView: React.FC<MemberOutputViewProps> = ({ povMember, assets, 
     const project =
       projects.find((p) => p.deployedAssets?.some((a) => a.id === asset.id)) ||
       projects[0];
-    const projectSlug = project ? slugify(project.name) : 'default';
-    
-    const projectScope = project?.id || 'GLOBAL';
-    return `${baseUrl}/o/${memberSlug}/${projectSlug}/${assetSlug}?project=${encodeURIComponent(projectScope)}`;
+
+    // Id ikut ke dalam path, bukan sebagai ?project=. Link jadi mandiri: tidak
+    // ambigu walau ada dua project bernama sama, tetap hidup setelah project
+    // diganti nama, dan tidak bergantung pada localStorage — yang di browser
+    // bawaan OBS selalu kosong. Link lama ber-?project= tetap dikenali.
+    const projectSegment = project ? buildProjectSegment(project.name, project.id) : 'default';
+
+    return `${baseUrl}/o/${memberSlug}/${projectSegment}/${assetSlug}`;
   };
 
   const handleCopy = async (url: string) => {

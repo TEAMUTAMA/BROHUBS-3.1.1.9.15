@@ -6,6 +6,9 @@ import React, {
   useMemo,
   useCallback,
 } from 'react';
+import { loadProjectPlayers } from '@/lib/projectPlayers';
+import { resolveProjectScopeFromLocation } from '@/lib/outputRoute';
+import { companionStreamUrl } from '@/features/companion/streamUrl';
 import { useSharedState } from '@/lib/useSharedState';
 import { compressImage, LOGO_PRESET, BACKGROUND_PRESET } from '@/lib/imageCompression';
 import { 
@@ -301,6 +304,7 @@ import {
   ELIMINATION_BANNER_FULL_IMAGE_FIT_NOTE,
   ELIMINATION_BANNER_FULL_LAYOUT_NOTE,
   pickEliminationBannerVisual,
+  clampElimBannerDisplaySeconds,
   type EliminationBannerFullOverlayLayout,
   ELIMINATION_BANNER_FONT_FAMILY_OPTIONS,
   DEFAULT_ELIMINATION_BANNER_FONT_FAMILY_ID,
@@ -990,6 +994,11 @@ const enrichFirstBloodTarget = (
   return target;
 };
 
+// Satu array kosong dipakai bersama supaya identitasnya stabil antar-render.
+// Literal [] baru setiap render membuat useEffect yang bergantung padanya
+// berjalan terus-menerus.
+const EMPTY_PROJECT_PLAYERS: PlayerData[] = [];
+
 const INITIAL_LEADERBOARD_DATA = Array.from({ length: 16 }, (_, i) => ({
   rank: i + 1,
   team: `TEAM ${String.fromCharCode(65 + i)}`,
@@ -1035,11 +1044,47 @@ const INITIAL_VISUAL_CONFIG: VisualConfig = {
 };
 
 const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
-  asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers = [], companionProjectScope = null, isGlobalStudio = false, showMonitorProp = true,
+  asset, theme, availableAssets, userRole, onBack, onSelectAsset, onSelectTheme, projectPlayers: projectPlayersProp = [], companionProjectScope = null, isGlobalStudio = false, showMonitorProp = true,
   programAssetIdProp, onProgramAssetChange, getAssetStatusProp, onPreviewContentChange, visualOnly = false, monitorFeed = false, feedPlayKey, programFeed, onOverallRankingExitComplete, style
 }) => {
   const t = useT();
   useOverlayFonts();
+
+  /**
+   * Pemain dari Project Event DB — prop kalau ada, kalau tidak muat sendiri.
+   *
+   * Kenapa perlu jaring pengaman: prop `projectPlayers` di Dashboard diisi dari
+   * `deployProject`, dan itu HANYA terisi selama alur "deploy ke project"
+   * (`isDeployingToProject`). Membuka template lewat jalur lain mengirim array
+   * kosong, sehingga Auto-Sync menjawab "Belum ada data team di Project"
+   * padahal Manual Entry sudah berisi. Template lain tidak terkena karena
+   * TeamRosterView dan DrafNPickView sudah punya cadangan serupa — leaderboard
+   * ini yang tertinggal.
+   *
+   * `companionProjectScope` dipakai lebih dulu karena itu id project yang aktif
+   * di dashboard; `resolveProjectScopeFromLocation()` baru berguna di output
+   * OBS, di mana project ditentukan oleh URL `/o/...`.
+   */
+  // Identitasnya WAJIB stabil antar-render. Beberapa useEffect di bawah memakai
+  // `projectPlayers` sebagai dependency dan menulis ulang `teams` — dan `teams`
+  // ikut menyimpan `expanded` (buka/tutup baris tim). Kalau nilainya berganti
+  // identitas setiap render, efek-efek itu terus berjalan dan menimpa keadaan
+  // yang baru saja diklik user: baris tim membuka lalu langsung menutup lagi.
+  //
+  // Pemanggil mengirim `deployProject?.players ?? []`, dan literal `[]` itu
+  // objek baru setiap render — karena itu kondisi kosong dinormalkan ke null
+  // dulu supaya dependency-nya tidak pernah berubah tanpa alasan.
+  const propPlayers = projectPlayersProp.length > 0 ? projectPlayersProp : null;
+
+  const projectPlayers = useMemo(() => {
+    if (propPlayers) return propPlayers;
+    if (typeof window === 'undefined') return EMPTY_PROJECT_PLAYERS;
+    const scope = companionProjectScope || resolveProjectScopeFromLocation();
+    if (!scope || scope === 'GLOBAL') return EMPTY_PROJECT_PLAYERS;
+    // findProjectByIdSync menyimpan hasilnya di projectCache, jadi pemanggilan
+    // berikutnya mengembalikan array yang sama persis, bukan salinan baru.
+    return loadProjectPlayers(scope) ?? EMPTY_PROJECT_PLAYERS;
+  }, [propPlayers, companionProjectScope]);
   const syncCompanionData = (payload: Parameters<typeof notifyCompanionData>[0]) =>
     notifyCompanionData(payload, companionProjectScope);
   const syncCompanionAnimation = (payload: Parameters<typeof notifyCompanionAnimation>[0]) =>
@@ -1110,7 +1155,7 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
   useEffect(() => {
     if (visualOnly || !companionProjectScope) return;
 
-    const sse = new EventSource('/api/companion/stream');
+    const sse = new EventSource(companionStreamUrl(companionProjectScope));
     const handleTelemetry = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data) as {
@@ -2281,8 +2326,11 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       if (eliminationQueueRef.current.length > 0) {
         playNextEliminationBanner();
       }
-    }, 5500);
-  }, [pushEliminationToCompanion, setEliminationAlert]);
+      // Dulu 5500 ms hardcoded. Sekarang mengikuti setelan, seperti First Blood
+      // dan Terminator. Default-nya tetap 5,5 detik sehingga tampilan yang sudah
+      // disetel tidak berubah.
+    }, clampElimBannerDisplaySeconds(visualConfig.elimBannerDisplaySeconds) * 1000);
+  }, [pushEliminationToCompanion, setEliminationAlert, visualConfig.elimBannerDisplaySeconds]);
 
   const buildTeamEliminationAlert = useCallback(
     (teamIndex: number, placementRank: number, teamsSnapshot: Team[]): TeamEliminationAlert | null => {
@@ -2518,8 +2566,21 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     ? (frozenStagedElimAlert ?? previewState.elimination.alert ?? STAGED_ELIM_PREVIEW_FALLBACK)
     : (previewEliminationAlert ?? eliminationAlert);
 
+  /**
+   * Tiga jalur, dan hanya jalur live yang boleh dibungkam fase endgame.
+   *
+   * Sebelumnya syarat `!isEndgamePhase` ikut mengenai preview manual (tombol
+   * PREVIEW di sebelah RESET), sehingga begitu tim tersisa ≤4 tombol itu diam
+   * saja tanpa penjelasan — padahal PREVIEW SEMENTARA di sebelahnya tetap
+   * jalan. Preview adalah alat desain: harus bisa diputar kapan pun.
+   *
+   * Penjagaan aslinya tetap utuh untuk banner yang muncul sungguhan, supaya
+   * tidak bentrok dengan bar Final Four.
+   */
   const showEliminationBanner =
-    elimBannerPreviewVisible || (!isEndgamePhase && displayElimAlert !== null);
+    elimBannerPreviewVisible ||
+    previewEliminationAlert !== null ||
+    (!isEndgamePhase && eliminationAlert !== null);
 
   useEffect(() => {
     if (!isEndgamePhase || elimBannerHoldPreview) return;
@@ -2725,10 +2786,42 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
       }
     : { previewMode: false as const };
 
+  /**
+   * Mainkan preview banner sekali, di SEMUA instance.
+   *
+   * Panel kontrol dan kanvas monitor adalah dua instance komponen ini yang
+   * terpisah; mereka hanya bertemu lewat `previewState` (useSharedState).
+   * Versi sebelumnya hanya memanggil `setPreviewEliminationAlert`, yaitu
+   * useState biasa — jadi alert-nya berhenti di instance panel dan tidak pernah
+   * sampai ke kanvas. Tombolnya bisa diklik, tidak error, tapi tidak ada yang
+   * terlihat. Terminator dan First Blood tidak kena karena keduanya sudah
+   * memakai `token` di previewState; field `token` untuk elimination sebenarnya
+   * sudah ada, hanya belum dipakai.
+   */
   const previewEliminationBanner = useCallback(() => {
     if (elimBannerHoldPreview) return;
     const base = buildStagedElimPreviewAlert();
     const alert = { ...base, id: createEventId() };
+    setLocalPreview((prev) => ({
+      ...prev,
+      elimination: { ...prev.elimination, token: Date.now(), alert },
+    }));
+  }, [buildStagedElimPreviewAlert, elimBannerHoldPreview, setLocalPreview]);
+
+  /**
+   * Setiap instance memutar preview-nya sendiri saat token berubah, lalu
+   * membersihkannya setelah durasi yang disetel — sama seperti banner aslinya.
+   */
+  const lastElimPreviewTokenRef = useRef(previewState.elimination.token);
+  useEffect(() => {
+    const token = previewState.elimination.token;
+    if (!token || lastElimPreviewTokenRef.current === token) return;
+    lastElimPreviewTokenRef.current = token;
+    if (elimBannerHoldPreview) return;
+
+    const alert = previewState.elimination.alert;
+    if (!alert) return;
+
     setPreviewEliminationAlert(alert);
     if (previewEliminationClearTimerRef.current) {
       clearTimeout(previewEliminationClearTimerRef.current);
@@ -2736,11 +2829,15 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     previewEliminationClearTimerRef.current = setTimeout(() => {
       setPreviewEliminationAlert(null);
       previewEliminationClearTimerRef.current = null;
-    }, 4000);
+      // Dulu 4000 ms tetap, padahal banner aslinya bertahan 5,5 detik — jadi
+      // preview tidak pernah mewakili yang sebenarnya terlihat penonton.
+      // Sekarang keduanya memakai satu setelan yang sama.
+    }, clampElimBannerDisplaySeconds(visualConfig.elimBannerDisplaySeconds) * 1000);
   }, [
-    buildStagedElimPreviewAlert,
     elimBannerHoldPreview,
-    setPreviewEliminationAlert,
+    previewState.elimination.alert,
+    previewState.elimination.token,
+    visualConfig.elimBannerDisplaySeconds,
   ]);
 
   useEffect(() => {
@@ -3415,6 +3512,14 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
     setKillEventLog([]);
     setEliminationAlert(null);
     seenEliminationsRef.current.clear();
+
+    // Mengosongkan set di atas saja tidak cukup — penjaga baseline harus ikut
+    // diturunkan. Efek pengisi baseline berhenti di baris pertamanya selama
+    // penjaga ini `true`, sehingga set tetap kosong dan SETIAP tim yang
+    // statusnya sudah habis dianggap baru tereliminasi. Akibatnya banner
+    // eliminasi meletus berbarengan tepat setelah Auto-Sync, bersamaan dengan
+    // First Blood yang juga baru dipersenjatai di bawah.
+    eliminationsInitializedRef.current = false;
     eliminationQueueRef.current = [];
     eliminationShowingRef.current = false;
     firstBloodTriggeredMatchRef.current = null;
@@ -5245,7 +5350,33 @@ const OverlayOverallRankingView: React.FC<OverlayOverallRankingViewProps> = ({
                                       <Monitor size={10} />
                                       <span className="text-[7px] font-black uppercase tracking-widest">{t('olb.previewToPgm')}</span>
                                     </label>
+
                                     </div>
+
+                                <div className="flex items-center gap-3 mb-3">
+                                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 shrink-0">
+                                    Durasi Tampil
+                                  </span>
+                                  <input
+                                    type="range"
+                                    min={1}
+                                    max={30}
+                                    step={0.5}
+                                    value={clampElimBannerDisplaySeconds(visualConfig.elimBannerDisplaySeconds)}
+                                    onChange={(e) =>
+                                      setVisualConfig((prev) => ({
+                                        ...prev,
+                                        elimBannerDisplaySeconds: clampElimBannerDisplaySeconds(
+                                          parseFloat(e.target.value)
+                                        ),
+                                      }))
+                                    }
+                                    className="flex-1 accent-[#ccff00]"
+                                  />
+                                  <span className="text-[8px] font-mono text-[#ccff00] w-10 text-right shrink-0">
+                                    {clampElimBannerDisplaySeconds(visualConfig.elimBannerDisplaySeconds)}s
+                                  </span>
+                                </div>
                                 </div>
                                 <p className="text-[8px] font-medium text-zinc-600 normal-case mb-3 tracking-wide leading-relaxed">
                                   Geser <span className="text-zinc-400">seluruh banner eliminasi</span> di canvas

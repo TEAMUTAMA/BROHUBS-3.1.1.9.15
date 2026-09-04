@@ -151,7 +151,10 @@ export async function compressImage(file: File, opts: CompressOptions = {}): Pro
       return await readAsDataURL(file);
     }
 
-    if (import.meta.env && import.meta.env.DEV) {
+    // Sengaja TIDAK memakai `import.meta.env && …`: menyebut import.meta.env
+    // tanpa nama kunci memaksa Vite menyalin SELURUH objek env ke bundle,
+    // sehingga semua variabel VITE_* ikut terbit walau tidak pernah dipakai.
+    if (import.meta.env.DEV) {
       const before = Math.round(file.size / 1024);
       const after = Math.round(dataUrlBytes(out) / 1024);
       // eslint-disable-next-line no-console

@@ -382,8 +382,29 @@ const StandaloneProgramView: React.FC = () => {
     );
   }
 
+  /**
+   * Link output per-aset (`/o/.../{aset}`) sekarang MENGIKUTI bus program:
+   * asetnya baru tampil setelah dinaikkan ke salah satu layer di Global Studio.
+   *
+   * Sebelumnya aset dari URL selalu tampil, apa pun isi PGM. Alasannya dulu masuk
+   * akal — state program tidak selalu sampai ke perangkat lain, jadi daripada OBS
+   * menampilkan layar hitam, asetnya dipaksa tampil. Sejak koneksi SSE menyaring
+   * per `?projectScope=`, state program terkirim andal per project, sehingga
+   * pemaksaan itu tidak lagi diperlukan dan justru membingungkan: overlay muncul
+   * di output padahal operator belum menekan Play.
+   *
+   * `?always=1` mempertahankan perilaku lama untuk source yang memang harus
+   * selalu menyala (mis. lower-third permanen) atau untuk memeriksa satu aset
+   * tanpa menyentuh PGM.
+   */
+  const alwaysOn = new URLSearchParams(window.location.search).get('always') === '1';
+  const routeAssetOnProgram = routeAssetId
+    ? Object.values(programLayers).includes(routeAssetId)
+    : false;
+  const showRouteAsset = Boolean(routeAssetId) && (alwaysOn || routeAssetOnProgram);
+
   const activeLayersCount = routeAssetId
-    ? 1
+    ? (showRouteAsset ? 1 : 0)
     : Object.values(programLayers).filter((assetId) => {
     if (!assetId) return false;
     return true;
@@ -413,11 +434,11 @@ const StandaloneProgramView: React.FC = () => {
           {programLayerSlots.map((layer) => {
             const layerNum = Number(layer);
             const assetId = programLayers[layerNum];
-            // URL output asset (/o/... atau ?asset=...) harus tetap terlihat saat
-            // dibuka dari perangkat lain seperti OBS/vMix. Program layer hanya
-            // mengatur tampilan ketika tidak ada asset yang ditentukan oleh URL.
+            // Aset dari URL dirender di layer 1, tapi hanya saat ia benar-benar
+            // ada di bus program — atau saat `?always=1` diminta. Lihat catatan
+            // pada showRouteAsset di atas.
             const visibleAssetId = routeAssetId
-              ? layerNum === 1
+              ? layerNum === 1 && showRouteAsset
                 ? routeAssetId
                 : null
               : assetId;

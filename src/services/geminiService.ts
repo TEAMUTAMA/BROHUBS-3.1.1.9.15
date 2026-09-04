@@ -1,34 +1,41 @@
+/**
+ * AI Assist — client.
+ *
+ * Kunci Gemini TIDAK pernah ada di sini. Browser hanya memanggil route server
+ * `POST /api/ai/chat`; kunci aslinya dibaca dari GEMINI_API_KEY di sisi server
+ * (lihat server/server.ts). Jangan pernah mengembalikan pemanggilan SDK Gemini
+ * langsung dari client — apa pun yang di-import di sini ikut ke bundle publik.
+ */
 
-import { GoogleGenAI } from "@google/genai";
+const AI_ENDPOINT = '/api/ai/chat';
 
-let ai: GoogleGenAI | null = null;
+const FALLBACK_UNAVAILABLE =
+  'AI assistant is unavailable. Add GEMINI_API_KEY to .env.local (server side) to enable chat.';
+const FALLBACK_ERROR = "I'm having a bit of trouble connecting right now. Please try again later.";
 
-function getClient(): GoogleGenAI | null {
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!ai) ai = new GoogleGenAI({ apiKey });
-  return ai;
-}
-
-export const getAIResponse = async (prompt: string) => {
-  const client = getClient();
-  if (!client) {
-    return "AI assistant is unavailable. Add GEMINI_API_KEY to .env.local to enable chat.";
-  }
-
+export const getAIResponse = async (prompt: string): Promise<string> => {
   try {
-    const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: "You are the AI assistant for BROHUBS, the premium high-performance broadcasting platform for digital creators. You represent BROHUBS (all caps). You are professional, tech-forward, and extremely knowledgeable about streaming technology. You focus on explaining BROHUBS features like 4K 60FPS streaming, white-label branding, ultra-low latency toolkit, and smart automation for studios. Your goal is to make creators feel like BROHUBS is their ultimate studio partner.",
-        temperature: 0.7,
-      },
+    const res = await fetch(AI_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
     });
-    // Directly access the .text property on the response object.
-    return response.text;
+
+    if (res.status === 503) return FALLBACK_UNAVAILABLE;
+
+    if (res.status === 429) {
+      return 'Terlalu banyak permintaan dalam waktu singkat. Tunggu sebentar lalu coba lagi.';
+    }
+
+    if (!res.ok) {
+      console.error('[ai] Server menolak permintaan:', res.status);
+      return FALLBACK_ERROR;
+    }
+
+    const data = (await res.json()) as { text?: string };
+    return data.text?.trim() || FALLBACK_ERROR;
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "I'm having a bit of trouble connecting right now. Please try again later.";
+    console.error('[ai] Gagal menghubungi /api/ai/chat:', error);
+    return FALLBACK_ERROR;
   }
 };

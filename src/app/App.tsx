@@ -13,6 +13,7 @@ import { getMembers } from '@/services/memberService';
 import { getBranding, saveBrandingLogo, resetBrandingLogo } from '@/services/brandingService';
 import { Ad, Member } from '@/types';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { restoreSession, logoutUser, emailOf } from '@/features/auth/authService';
 
 const EMPTY_FAVICON =
   'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22/%3E';
@@ -44,7 +45,9 @@ const updateBrowserFavicon = (logoUrl: string | null) => {
 const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'dashboard' | 'studio' | 'broadcast_showcase' | 'program'>('landing');
   const [isAIOpen, setIsAIOpen] = useState(false);
-  const [userRole, setUserRole] = useState<'admin' | 'member'>('admin');
+  // Default 'member', bukan 'admin': sebelum ada sesi terverifikasi, hak paling
+  // rendah yang berlaku. Peran sebenarnya datang dari kolom `role` di profiles.
+  const [userRole, setUserRole] = useState<'admin' | 'member'>('member');
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
   const [memberRequiresPasswordSetup, setMemberRequiresPasswordSetup] = useState(false);
   
@@ -65,9 +68,29 @@ const App: React.FC = () => {
   useEffect(() => {
     // Enable direct navigation to the standalone program overlay view
     const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'program' || window.location.pathname.includes('/o/')) {
+    const isProgramView =
+      params.get('view') === 'program' || window.location.pathname.includes('/o/');
+
+    if (isProgramView) {
       setView('program');
+      return;
     }
+
+    // Pulihkan sesi Supabase yang masih hidup. Link output OBS (/o/...) sengaja
+    // dilewati: halaman itu harus tetap tampil tanpa login.
+    void restoreSession()
+      .then((result) => {
+        if (!result) return;
+        setUserRole(result.role);
+        setCurrentUserEmail(emailOf(result));
+        setMemberRequiresPasswordSetup(
+          result.role === 'member' && result.requiresPasswordSetup
+        );
+        setView('dashboard');
+      })
+      .catch((error) => {
+        console.error('[auth] Gagal memulihkan sesi:', error);
+      });
   }, []);
 
   useEffect(() => {
@@ -162,7 +185,13 @@ const App: React.FC = () => {
         userRole={userRole}
         currentUserEmail={currentUserEmail}
         onSwitchRole={setUserRole}
-        onExit={() => { setView('landing'); setCurrentUserEmail(''); setMemberRequiresPasswordSetup(false); }}
+        onExit={() => {
+          void logoutUser();
+          setView('landing');
+          setUserRole('member');
+          setCurrentUserEmail('');
+          setMemberRequiresPasswordSetup(false);
+        }}
         requiresPasswordSetup={memberRequiresPasswordSetup}
         onClearPasswordSetup={() => setMemberRequiresPasswordSetup(false)}
         onOpenAI={() => setIsAIOpen(true)}

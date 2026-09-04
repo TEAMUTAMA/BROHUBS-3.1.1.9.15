@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSharedState } from '@/lib/useSharedState';
 import { DEFAULT_PROGRAM_LAYERS, getProgramLayersKey, getPreviewAssetKey, companionScopeMatches } from '@/features/companion/programLayers';
 import { notifyCompanionTrigger, type CompanionTriggerPayload } from '@/features/companion/companionProgram';
+import { companionStreamUrl } from '@/features/companion/streamUrl';
 import { applyCompanionDataPayload, notifyCompanionData, type CompanionDataPayload } from '@/features/companion/overlayData';
 import {
   AnimationConfig,
@@ -601,7 +602,7 @@ const GlobalStudio: React.FC<GlobalStudioProps> = ({ games, themes, userRole, gl
     let reconnectTimeout: any = null;
 
     const connectSSE = () => {
-      sse = new EventSource('/api/companion/stream');
+      sse = new EventSource(companionStreamUrl(companionProjectScope));
       
       sse.onopen = () => {
         setSseConnected(true);

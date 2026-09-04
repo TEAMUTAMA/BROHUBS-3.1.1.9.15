@@ -129,8 +129,6 @@ const MasterOutputView: React.FC<MasterOutputViewProps> = ({ assets, members, pr
     setActiveFolderFilter('all');
   }, [selectedMemberId]);
 
-  const slugify = (text: string) => text.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
-
   const getPublicUrl = (asset: Asset) => {
     return asset.url;
   };

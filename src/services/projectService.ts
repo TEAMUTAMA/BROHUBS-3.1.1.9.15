@@ -184,16 +184,22 @@ export async function saveUserHistory(ownerEmail: string, history: Project[]): P
   );
 
   const supabase = getSupabase();
-  const { data: existing } = await supabase
-    .from('user_projects')
-    .select('projects')
-    .eq('owner_email', ownerEmail)
-    .maybeSingle();
 
+  // JANGAN ikut menulis kolom `projects` di sini.
+  //
+  // Menghapus project mengubah DUA state sekaligus (projects & history), dan
+  // Dashboard menyimpan keduanya lewat effect terpisah yang berjalan bersamaan.
+  // Versi sebelumnya membaca `projects` lebih dulu lalu mengirimkannya kembali
+  // dalam upsert ini — read-modify-write klasik. Kalau tulisan ini mendarat
+  // setelah saveUserProjects, ia mengembalikan daftar project versi SEBELUM
+  // penghapusan, sehingga project yang sudah dihapus muncul lagi begitu browser
+  // di-refresh.
+  //
+  // Dengan kolom `projects` tidak disebut, upsert hanya menyentuh `history`;
+  // pada baris baru kolom itu memakai default `'[]'::jsonb` dari schema.
   const { error } = await supabase.from('user_projects').upsert(
     {
       owner_email: ownerEmail,
-      projects: (existing?.projects ?? []) as Project[],
       history: processed,
       updated_at: new Date().toISOString(),
     },

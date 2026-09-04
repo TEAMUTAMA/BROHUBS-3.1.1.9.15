@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Copy, RefreshCw, Activity, X, Lock, Check, Key, AlertTriangle, ShieldAlert, BadgeAlert, Calendar, Clock, MoreVertical, Trash2, Loader2, Zap, Search, Bell, Inbox, ChevronRight, Filter } from 'lucide-react';
 import { Member } from '@/types';
+import { createMember, resetMemberPassword } from '@/services/memberService';
 import { useT } from '@/i18n/LanguageContext';
 
 interface MemberManagementProps {
@@ -56,6 +57,15 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
+  // Pembuatan akun berjalan di server, jadi butuh state menunggu & gagal.
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [resettingEmail, setResettingEmail] = useState<string | null>(null);
+
+  // Pesan singkat untuk aksi yang tidak menghasilkan password (perpanjangan,
+  // kegagalan reset). Dulu semuanya dipaksa lewat modal password.
+  const [notice, setNotice] = useState('');
+
   // Identify members with pending extensions
   const pendingExtensions = members.filter(m => m.extensionPending);
   const totalRequests = resetRequests.length + pendingExtensions.length;
@@ -101,42 +111,49 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     }
   };
 
-  const generateSystemPassword = () => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let pass = "BHS";
-    for (let i = 0; i < 8; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    return pass;
-  };
+  // generateSystemPassword() sengaja dihapus. Fungsi itu mengarang string
+  // "BHS…" di browser dan menampilkannya sebagai password, padahal tidak ada
+  // apa pun yang berubah di Supabase. Semua password sekarang datang dari
+  // server, yang benar-benar menyetelnya.
 
   // --- Add Member Logic ---
 
-  const handleAddMember = () => {
+  /**
+   * Membuat akun member yang BENAR-BENAR bisa login.
+   *
+   * Versi sebelumnya hanya menaruh objek Member ke state dan menampilkan
+   * "password" karangan dari browser — tidak ada akun auth yang
+   * dibuat, jadi member tidak pernah bisa login dan password yang ditampilkan
+   * tidak berlaku di mana pun. Itu sisa alur kode verifikasi sebelum pindah ke
+   * Supabase Auth.
+   *
+   * Sekarang permintaannya dikirim ke /api/admin/members, yang membuat akun
+   * memakai service_role key milik server.
+   */
+  const handleAddMember = async () => {
+    if (isCreating) return;
     if (!formData.name || !formData.email) return;
 
-    // Generate Password
-    const newPassword = generateSystemPassword();
-    setGeneratedPassword(newPassword);
+    setIsCreating(true);
+    setCreateError('');
 
-    // Calculate Expiry
-    const date = new Date();
-    date.setMonth(date.getMonth() + parseInt(formData.duration));
-    const expiryISO = date.toISOString().split('T')[0];
-
-    // Create Member
-    const newMember: Member = {
+    const result = await createMember({
       name: formData.name,
-      email: formData.email.toUpperCase(),
-      status: 'OFFLINE',
+      email: formData.email,
       package: formData.package,
-      initial: formData.name.charAt(0).toUpperCase(),
-      expiryDate: expiryISO,
-      resetStatus: 'CONFIRMED',
-      tempPassword: newPassword,
-      needsNewPassword: true,
-    };
+      durationMonths: parseInt(formData.duration, 10) || 1,
+    });
 
-    setMembers(prev => [...prev, newMember]);
-    
+    setIsCreating(false);
+
+    if (!result.ok || !result.member || !result.password) {
+      setCreateError(result.error ?? 'Gagal membuat akun member.');
+      return;
+    }
+
+    setGeneratedPassword(result.password);
+    setMembers(prev => [...prev, result.member as Member]);
+
     // Switch Modals
     setIsModalOpen(false);
     setShowSuccessModal(true);
@@ -144,11 +161,17 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
   };
 
   // --- Re-activation Logic ---
+  /**
+   * Perpanjang masa aktif / ganti paket.
+   *
+   * Tidak lagi menyentuh password. Versi sebelumnya mengarang password lewat
+   * string acak di browser dan menampilkannya ke admin, padahal tidak ada apa
+   * pun yang berubah di Supabase — password itu tidak bisa dipakai login.
+   * Perpanjangan paket dan reset password adalah dua hal berbeda; kalau member
+   * memang butuh password baru, pakai tombol reset.
+   */
   const handleExtendPlan = () => {
       if(!extensionTarget) return;
-
-      const newPass = generateSystemPassword();
-      setGeneratedPassword(newPass);
 
       const date = new Date();
       date.setMonth(date.getMonth() + parseInt(extensionData.duration));
@@ -160,21 +183,19 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                   ...m,
                   expiryDate: expiryISO,
                   package: extensionData.package,
-                  status: 'ONLINE', // Reactivate
                   isExtensionFlagged: false,
                   isExpired: false,
                   extensionPending: false,
                   requestedPackage: undefined, // Clear request
-                  tempPassword: newPass,
-                  needsNewPassword: true,
               };
           }
           return m;
       }));
 
+      setNotice(
+        `${extensionTarget.name}: paket ${extensionData.package}, aktif sampai ${expiryISO}.`,
+      );
       setExtensionTarget(null);
-      setShowSuccessModal(true); // Show new password to admin
-      setIsCopied(false);
   };
 
   const handleCloseSuccess = () => {
@@ -216,29 +237,42 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     setResetTarget(null);
   };
 
-  // Approve request coming from Navbar (Forgot Password flow)
-  const approveRequest = (email: string) => {
+  /**
+   * Setujui permintaan lupa password dari Navbar.
+   *
+   * Password barunya sekarang benar-benar disetel di Supabase lewat
+   * /api/admin/members/password. Sebelumnya hanya string karangan dari browser,
+   * jadi member tetap tidak bisa login dengan password yang diberikan admin.
+   */
+  const approveRequest = async (email: string) => {
     const member = members.find(m => m.email === email || m.name === email);
-    
-    if (member) {
-        // Auto reset
-        const newPass = generateSystemPassword();
-        setMembers(prev => prev.map(m => {
-            if (m.email === member.email) {
-                return { ...m, tempPassword: newPass, resetStatus: 'CONFIRMED' };
-            }
-            return m;
-        }));
-    } else {
-        alert("Member not found in database, but request cleared.");
+
+    if (!member) {
+      setNotice(`Member "${email}" tidak ada di daftar. Permintaannya dibersihkan.`);
+      if (onClearRequest) onClearRequest(email);
+      if (totalRequests <= 1) setIsRequestsModalOpen(false);
+      return;
     }
 
-    if (onClearRequest) onClearRequest(email);
-    
-    // Close modal if no more requests
-    if (totalRequests <= 1) {
-        setIsRequestsModalOpen(false);
+    setResettingEmail(member.email);
+    const result = await resetMemberPassword(member.email);
+    setResettingEmail(null);
+
+    if (!result.ok || !result.password) {
+      setNotice(result.error ?? 'Gagal mereset password.');
+      return; // permintaan sengaja TIDAK dibersihkan supaya bisa dicoba lagi
     }
+
+    setMembers(prev => prev.map(m => (
+      m.email === member.email ? { ...m, resetStatus: 'CONFIRMED' } : m
+    )));
+
+    setGeneratedPassword(result.password);
+    setIsCopied(false);
+    setIsRequestsModalOpen(false);
+    setShowSuccessModal(true);
+
+    if (onClearRequest) onClearRequest(email);
   };
 
   const handleApproveExtension = (member: Member) => {
@@ -268,6 +302,19 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
+      {notice && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-[#ccff00]/30 bg-[#ccff00]/5 px-5 py-4">
+          <Check size={16} className="mt-0.5 shrink-0 text-[#ccff00]" />
+          <p className="flex-1 text-xs font-bold tracking-wide text-white">{notice}</p>
+          <button
+            onClick={() => setNotice('')}
+            className="text-zinc-500 transition-colors hover:text-white"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
         <h1 className="text-4xl font-black tracking-tight text-white shrink-0">{t('mm.title')}</h1>
         
@@ -394,10 +441,14 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                                             <p className="text-[10px] font-bold text-red-400/60 uppercase tracking-wider">{t('mm.requestedPasswordReset')}</p>
                                         </div>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => approveRequest(req)}
-                                        className="bg-red-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-red-600 transition-colors shadow-[0_0_15px_rgba(239,68,68,0.3)] flex items-center gap-2"
+                                        disabled={resettingEmail !== null}
+                                        className="bg-red-500 text-white px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-red-600 transition-colors shadow-[0_0_15px_rgba(239,68,68,0.3)] flex items-center gap-2 disabled:opacity-50"
                                     >
+                                        {resettingEmail === req ? (
+                                          <Loader2 size={12} className="animate-spin" />
+                                        ) : null}
                                         {t('mm.approve')} <ChevronRight size={12} />
                                     </button>
                                 </div>
@@ -610,12 +661,15 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                                     {t('mm.waiting')}
                                     </button>
                                 ) : isRequested ? (
-                                    <button 
+                                    <button
                                     onClick={() => approveRequest(member.email)}
-                                    className="flex-1 md:flex-none px-3 py-3 md:py-2 text-[9px] font-black text-white bg-red-500 hover:bg-red-600 border border-red-500 rounded-lg transition-all tracking-widest uppercase flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(239,68,68,0.4)] animate-pulse"
+                                    disabled={resettingEmail !== null}
+                                    className="flex-1 md:flex-none px-3 py-3 md:py-2 text-[9px] font-black text-white bg-red-500 hover:bg-red-600 border border-red-500 rounded-lg transition-all tracking-widest uppercase flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(239,68,68,0.4)] animate-pulse disabled:opacity-50 disabled:animate-none"
                                     title={t('mm.approveResetRequest')}
                                     >
-                                    <ShieldAlert size={12} />
+                                    {resettingEmail === member.email
+                                      ? <Loader2 size={12} className="animate-spin" />
+                                      : <ShieldAlert size={12} />}
                                     {t('mm.accReset')}
                                     </button>
                                 ) : (
@@ -750,10 +804,19 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                 </div>
               </div>
 
-              <button 
+              {createError && (
+                <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-400" />
+                  <p className="text-[11px] leading-relaxed text-red-300">{createError}</p>
+                </div>
+              )}
+
+              <button
                 onClick={handleAddMember}
-                className="w-full bg-[#ccff00] text-black py-4 rounded-xl font-black text-xs tracking-[0.2em] uppercase hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_20px_rgba(204,255,0,0.2)] mt-4"
+                disabled={isCreating}
+                className="w-full bg-[#ccff00] text-black py-4 rounded-xl font-black text-xs tracking-[0.2em] uppercase hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_20px_rgba(204,255,0,0.2)] mt-4 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2"
               >
+                {isCreating && <Loader2 size={14} className="animate-spin" />}
                 {t('mm.authorizeNode')}
               </button>
             </div>
