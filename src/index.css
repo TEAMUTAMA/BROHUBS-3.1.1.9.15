@@ -1,0 +1,24 @@
+/* BROHUBS base styles (Tailwind loaded via CDN in index.html) */
+
+@font-face {
+  font-family: 'AMBOY';
+  src:
+    url('/assets/fonts/AMBOY.woff2') format('woff2'),
+    url('/assets/fonts/AMBOY.woff') format('woff'),
+    url('/assets/fonts/AMBOY.ttf') format('truetype'),
+    url('/assets/fonts/AMBOY.otf') format('opentype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Industry Black';
+  src: url('/assets/fonts/IndustryTest-Black.otf') format('opentype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Teko ExtraBold';
+  src: url('/assets/fonts/Teko-ExtraBold.ttf') format('truetype');
+  font-weight: 800;
+  font-display: swap;
+}

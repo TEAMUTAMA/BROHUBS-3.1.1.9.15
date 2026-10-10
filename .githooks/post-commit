@@ -1,0 +1,100 @@
+#!/bin/sh
+# BROHUBS — post-commit hook (ter-version; aktif via core.hooksPath=.githooks)
+# Otomatis menambahkan ringkasan commit ke DevLog hari ini, commit DevLog itu tanpa loop,
+# lalu push ke GitHub.
+# Sejak monorepo: Doc/ berada DI DALAM repo (root), jadi pakai $REPO_ROOT/Doc.
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+push_head() {
+  if git remote get-url origin >/dev/null 2>&1; then
+    if git push origin HEAD >/dev/null 2>&1; then
+      echo "[post-commit] ✅ Auto-push ke GitHub berhasil."
+    else
+      echo "[post-commit] ⚠️  Auto-push gagal (offline / belum login / tak ada akses). Commit aman tersimpan lokal — jalankan 'git push' lagi nanti." >&2
+    fi
+  fi
+}
+
+if [ "$BROHUBS_SKIP_POST_COMMIT" = "1" ]; then
+  push_head
+  exit 0
+fi
+
+DEVLOG_DIR="$REPO_ROOT/Doc/DevLog"
+DATE="$(date +%Y-%m-%d)"
+TIME="$(date +%H:%M)"
+ENTRY="$DEVLOG_DIR/$DATE.md"
+
+HASH="$(git rev-parse --short HEAD)"
+SUBJECT="$(git log -1 --pretty=%s)"
+AUTHOR="$(git log -1 --pretty=%an)"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+FILES_LIST="$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | sed '/^$/d')"
+NFILES="$(printf '%s\n' "$FILES_LIST" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+# Ringkasan file: tampilkan nama bila 1–5, selebihnya hanya jumlah (anti-bising)
+if [ "$NFILES" -gt 0 ] && [ "$NFILES" -le 5 ]; then
+  FILES_SUMMARY="$(printf '%s\n' "$FILES_LIST" | awk 'NR>1{printf ", "} {printf "%s", $0}')"
+else
+  FILES_SUMMARY="${NFILES} file"
+fi
+
+mkdir -p "$DEVLOG_DIR" 2>/dev/null
+
+# Buat entri hari ini dari template bila belum ada
+if [ ! -f "$ENTRY" ]; then
+  cat > "$ENTRY" <<EOF
+---
+date: $DATE
+type: devlog
+fokus: ""
+tags: [devlog]
+---
+
+# DevLog — $DATE
+
+> ⬅️ [[00 - DevLog Index]] · 🗂️ [[DevPlan]] · 📋 [[18 - Changelog dan Versi]]
+
+## 🎯 Fokus hari ini
+-
+
+## 🔧 Perubahan
+| Waktu | Perubahan | File / Area | Tipe | Status | Commit |
+|------|-----------|-------------|------|--------|--------|
+
+## 🤖 Commit otomatis
+<!-- AUTO-COMMITS -->
+
+## 🧠 Keputusan & alasan
+-
+
+## 🚧 Kendala / blocker
+-
+
+## ⏭️ Lanjutan berikutnya
+-
+EOF
+fi
+
+LINE="- \`$TIME\` \`$HASH\` ($BRANCH) — $SUBJECT — ${FILES_SUMMARY} — _${AUTHOR}_"
+
+# Sisipkan tepat di bawah marker (terbaru di atas). Jika marker tidak ada, tambah section.
+if grep -q "<!-- AUTO-COMMITS -->" "$ENTRY"; then
+  TMP="$(mktemp)"
+  awk -v line="$LINE" '{print} /<!-- AUTO-COMMITS -->/{print line}' "$ENTRY" > "$TMP" && mv "$TMP" "$ENTRY"
+else
+  printf '\n## 🤖 Commit otomatis\n<!-- AUTO-COMMITS -->\n%s\n' "$LINE" >> "$ENTRY"
+fi
+
+# Commit DevLog auto-log sebagai commit terpisah tanpa menjalankan isi hook lagi.
+if ! git diff --quiet -- "$ENTRY"; then
+  git add -- "$ENTRY"
+  BROHUBS_SKIP_POST_COMMIT=1 git commit -m "docs(devlog): catat auto-log $HASH" >/dev/null 2>&1 || true
+fi
+
+# ── Auto-push ke GitHub (non-fatal: commit tetap aman bila offline) ──
+push_head
+
+exit 0
